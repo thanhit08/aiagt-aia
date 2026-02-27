@@ -34,3 +34,14 @@ class JiraClient(Protocol):
 class TelegramClient(Protocol):
     def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """Execute one Telegram action and return structured output."""
+
+
+class CacheStore(Protocol):
+    def get_json(self, key: str) -> dict[str, Any] | None:
+        """Fetch a JSON object from cache."""
+
+    def set_json(self, key: str, value: dict[str, Any], ttl_seconds: int) -> None:
+        """Store a JSON object in cache."""
+
+    def increment_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        """Increment counter and set TTL when key is first seen."""

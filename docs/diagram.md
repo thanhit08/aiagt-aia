@@ -10,6 +10,7 @@ flowchart LR
     User[User] --> AIA[AIA Orchestrator]
     AIA --> OpenAI[OpenAI]
     AIA --> Qdrant[Qdrant]
+    AIA --> Redis[Redis]
     AIA --> Jira[Jira API]
     AIA --> Slack[Slack API]
     AIA --> Obs[LangSmith/Langfuse]
@@ -25,6 +26,7 @@ flowchart TB
     Graph --> Synth[Answer Synthesis]
     Graph --> Planner[Action Planner]
     Planner --> Exec[Action Executor]
+    Graph --> Cache[Redis Cache/Rate Limit]
     Exec --> Jira[Jira Connector]
     Exec --> Slack[Slack Connector]
 ```
@@ -96,6 +98,8 @@ flowchart TB
     API2 --> OpenAI
     API1 --> Qdrant
     API2 --> Qdrant
+    API1 --> Redis
+    API2 --> Redis
     API1 --> Jira
     API2 --> Jira
     API1 --> Slack

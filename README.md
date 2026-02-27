@@ -20,6 +20,8 @@ uvicorn aia.api.main:app --host 0.0.0.0 --port 8000
 1. Ensure `.env` exists.
 2. For compose, set:
 - `QDRANT_URL=http://qdrant:6333`
+- `REDIS_ENABLED=true`
+- `REDIS_URL=redis://redis:6379/0`
 3. Start everything:
 ```bash
 docker compose up --build
@@ -67,6 +69,11 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
 ## Slack status
 - Slack actions currently return: `not supported yet`.
 - Response includes suggestion to use Telegram action `telegram_send_message`.
+
+## Redis usage
+- Response cache for repeated requests (`REDIS_RESPONSE_TTL_SECONDS`).
+- Per-user rate limiting (`REDIS_RATE_LIMIT_PER_MINUTE`).
+- Safe fallback to in-memory cache when Redis is unavailable.
 
 ## CI/CD
 - CI: `.github/workflows/ci.yml`

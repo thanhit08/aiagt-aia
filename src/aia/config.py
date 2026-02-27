@@ -34,6 +34,11 @@ class Settings:
     langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
     langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "")
 
+    redis_url: str = os.getenv("REDIS_URL", "")
+    redis_enabled: bool = _env_bool("REDIS_ENABLED", False)
+    redis_response_ttl_seconds: int = int(os.getenv("REDIS_RESPONSE_TTL_SECONDS", "300"))
+    redis_rate_limit_per_minute: int = int(os.getenv("REDIS_RATE_LIMIT_PER_MINUTE", "60"))
+
 
 def load_settings() -> Settings:
     return Settings()

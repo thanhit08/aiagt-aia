@@ -56,6 +56,7 @@ Users need one endpoint that can answer questions and perform operational action
 - Jira action execution (read/write/update/search/transition/comment).
 - Slack action execution (post/update/thread/search/channel/member actions).
 - Unified response with action results and trace metadata.
+- Redis-backed caching and rate limiting.
 
 ### 6.2 Out of Scope (Current Phase)
 - Autonomous multi-day workflow execution.
@@ -104,6 +105,7 @@ Users need one endpoint that can answer questions and perform operational action
 - NFR-03 Scalability: stateless API horizontal scaling.
 - NFR-04 Security: per-action authorization, secret management, redaction.
 - NFR-05 Auditability: every action includes request correlation IDs.
+- NFR-06 Redis-backed controls: response caching and per-user throttling.
 
 ## 10. Data Contracts
 ### 10.1 Enriched Task (Example)

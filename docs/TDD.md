@@ -22,6 +22,7 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 - Vector DB: Qdrant (optional retrieval)
 - Observability: LangSmith + Langfuse
 - Connectors: Jira REST + Slack Web API
+- Redis: response cache + rate limiting
 
 ### 3.1 Runtime Connector Status
 - Jira connector: active.
@@ -109,6 +110,12 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 ### 6.10 Observability
 - Log: intent parse, action plan, action params hash, action result status, latency.
 - Trace each action step with correlation ID.
+
+### 6.11 Redis Cache and Throttling
+- Cache key: hash of `user_id + instruction + issues`.
+- Cache value: final response JSON with TTL.
+- Rate key: `rate:{user_id}` with 60-second window.
+- If Redis unavailable, fallback to in-memory implementation.
 
 ## 7. Data Models
 ### 7.1 Enriched Task (Logical)

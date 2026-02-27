@@ -1,6 +1,14 @@
 version: "3.9"
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: aia-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: aia-qdrant
@@ -18,7 +26,9 @@ services:
       - .env
     environment:
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
+      - redis
       - qdrant
     ports:
       - "8000:8000"
@@ -26,3 +36,4 @@ services:
 
 volumes:
   qdrant_data:
+  redis_data:

@@ -1,5 +1,7 @@
 import csv
+import hashlib
 import io
+import json
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -17,7 +19,7 @@ load_dotenv()
 
 app = FastAPI(title="AIA API", version="0.1.0")
 
-llm, vector_store, slack, jira, telegram = build_clients()
+llm, vector_store, slack, jira, telegram, cache_store, settings = build_clients()
 graph = build_graph(
     llm=llm,
     vector_store=vector_store,
@@ -79,6 +81,16 @@ class IntakeJsonRequest(BaseModel):
 
 @app.post("/qa-intake")
 def qa_intake(payload: IntakeJsonRequest) -> dict:
+    rate_key = f"rate:{payload.user_id}"
+    current = cache_store.increment_with_ttl(rate_key, ttl_seconds=60)
+    if current > settings.redis_rate_limit_per_minute:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+
+    cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.issues)
+    cached = cache_store.get_json(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
     request_id = str(uuid4())
     state = {
         "request_id": request_id,
@@ -87,7 +99,9 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         "user_id": payload.user_id,
     }
     result = graph.invoke(state)
-    return result["final_response"]
+    response = result["final_response"]
+    cache_store.set_json(cache_key, response, ttl_seconds=settings.redis_response_ttl_seconds)
+    return response
 
 
 def _register_upload_route() -> None:
@@ -119,3 +133,9 @@ def _register_upload_route() -> None:
 
 
 _register_upload_route()
+
+
+def _response_cache_key(user_id: str, instruction: str, issues: list[dict]) -> str:
+    payload = json.dumps({"u": user_id, "i": instruction, "x": issues}, ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"resp:{digest}"
