@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from aia.api.main import app
 
@@ -65,3 +66,35 @@ def test_get_conversation() -> None:
     data = fetch_resp.json()
     assert data.get("conversation_id") == conversation_id
     assert isinstance(data.get("messages"), list)
+
+
+def test_upload_and_status_and_query_with_file_id() -> None:
+    if "/upload" not in [r.path for r in app.routes]:
+        pytest.skip("multipart upload route is not registered in this environment")
+
+    file_content = "line one\nline two\nline three\n"
+    files = {"file": ("notes.txt", file_content, "text/plain")}
+    data = {"user_id": "u-file"}
+    upload_resp = client.post("/upload", files=files, data=data)
+    assert upload_resp.status_code == 200
+    upload_body = upload_resp.json()
+    file_id = upload_body.get("file_id")
+    assert file_id
+
+    status_resp = client.get(f"/upload/{file_id}/status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body.get("state") in {"ready", "saving_to_qdrant", "embedding", "upload_complete", "initiated"}
+
+    qa_resp = client.post(
+        "/qa-intake",
+        json={
+            "user_id": "u-file",
+            "instruction": "Use the uploaded file to answer",
+            "issues": [],
+            "file_id": file_id,
+        },
+    )
+    assert qa_resp.status_code == 200
+    qa_body = qa_resp.json()
+    assert "answer" in qa_body

@@ -60,10 +60,38 @@ class StubLLMClient:
 
 
 class StubVectorStore:
+    def __init__(self) -> None:
+        self._chunks: list[dict[str, Any]] = []
+
+    def upsert_chunks(self, *, file_id: str, chunks: list[str]) -> dict[str, Any]:
+        for idx, chunk in enumerate(chunks):
+            self._chunks.append({"file_id": file_id, "chunk_index": idx, "text": chunk})
+        return {"status": "ok", "stored_chunks": len(chunks), "file_id": file_id}
+
     def search(
-        self, *, collections: list[str], query_text: str, top_k: int, min_score: float
+        self,
+        *,
+        collections: list[str],
+        query_text: str,
+        top_k: int,
+        min_score: float,
+        file_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        return [{"text": "Stub context", "score": 0.9, "collection": collections[0] if collections else ""}]
+        rows = self._chunks
+        if file_id:
+            rows = [r for r in rows if r["file_id"] == file_id]
+        rows = rows[:top_k]
+        if not rows:
+            return [{"text": "Stub context", "score": 0.9, "collection": collections[0] if collections else ""}]
+        return [
+            {
+                "text": r["text"],
+                "score": 1.0,
+                "collection": collections[0] if collections else "uploaded_files",
+                "payload": {"file_id": r["file_id"], "chunk_index": r["chunk_index"]},
+            }
+            for r in rows
+        ]
 
 
 class StubSlackClient:

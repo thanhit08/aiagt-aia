@@ -58,7 +58,8 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 ## 6. Component Design
 ### 6.1 API Layer
 - `POST /qa-intake` JSON endpoint.
-- Optional `POST /qa-intake-upload` multipart endpoint.
+- `POST /upload` multipart endpoint for asynchronous file ingestion.
+- `GET /upload/{file_id}/status` for Redis-based upload state polling.
 - Inputs: `instruction`, `user_id`, optional `issues`, optional file.
 
 ### 6.2 Enrichment Node
@@ -117,6 +118,21 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 - Cache value: final response JSON with TTL.
 - Rate key: `rate:{user_id}` with 60-second window.
 - If Redis unavailable, fallback to in-memory implementation.
+
+### 6.14 File Upload State Tracking (Redis)
+- File status key: `file_status:{file_id}`.
+- State transitions:
+  - `initiated`
+  - `upload_complete`
+  - `embedding`
+  - `saving_to_qdrant`
+  - `ready` or `failed`
+- File status TTL controlled by `REDIS_FILE_STATUS_TTL_SECONDS`.
+
+### 6.15 File-Aware RAG Retrieval
+- `/qa-intake` accepts optional `file_id`.
+- RAG node passes `file_id` to vector store search.
+- Qdrant retrieval applies payload filter on `file_id`.
 
 ### 6.12 Conversation Store (MongoDB)
 - Collections:

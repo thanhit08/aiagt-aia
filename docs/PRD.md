@@ -50,6 +50,7 @@ Users need one endpoint that can answer questions and perform operational action
 ## 6. Scope
 ### 6.1 In Scope
 - Unified query endpoint.
+- Independent file upload endpoint (`/upload`).
 - Optional file upload.
 - Request enrichment.
 - Optional RAG retrieval.
@@ -81,6 +82,10 @@ Users need one endpoint that can answer questions and perform operational action
 - FR-14 Request/Response Persistence: store each request and final response in MongoDB.
 - FR-15 Context Injection: include conversation summary + recent messages in new requests.
 - FR-16 History Compaction: apply rolling-summary algorithm when message history exceeds threshold.
+- FR-17 Upload Pipeline: user uploads file via `/upload`, system returns deterministic `file_id`.
+- FR-18 Upload Status: Redis tracks upload lifecycle (`initiated`, `upload_complete`, `embedding`, `saving_to_qdrant`, `ready|failed`).
+- FR-19 Upload Status Endpoint: expose `/upload/{file_id}/status` for polling.
+- FR-20 File-Aware Retrieval: `/qa-intake` accepts `file_id` and RAG retrieval filters by `file_id`.
 
 ## 8. Jira and Slack Action Catalog
 ### 8.1 Jira Action Types

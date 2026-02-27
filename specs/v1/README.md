@@ -4,10 +4,12 @@ This folder contains implementation-ready contracts for general query orchestrat
 
 ## Supported Interaction Pattern
 - User asks any question
-- Optional file/context provided
+- File uploaded via `/upload` gets `file_id`
+- `/qa-intake` can include `file_id` for file-scoped retrieval
 - Optional conversation_id for multi-turn continuity
 - Enrichment generates `action_plans[]`
 - Optional RAG retrieval
+- RAG retrieval supports filter by `file_id`
 - Conversation summary + recent messages injected as context
 - Route planner validates actions
 - Executors run Jira/Slack actions

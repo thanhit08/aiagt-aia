@@ -41,8 +41,9 @@ docker run -p 6333:6333 qdrant/qdrant
 ## Endpoints
 - `GET /health`
 - `GET /conversation/{conversation_id}` (inspect stored conversation/messages/tools)
+- `POST /upload` (file ingestion pipeline; returns `file_id`)
+- `GET /upload/{file_id}/status` (check ingest progress in Redis)
 - `POST /qa-intake` (JSON)
-- `POST /qa-intake-upload` (multipart; requires `python-multipart`)
 
 ## curl test (JSON)
 ```bash
@@ -52,6 +53,29 @@ curl -X POST http://localhost:8000/qa-intake \
     "user_id":"test-user",
     "conversation_id":"optional-conv-id",
     "instruction":"Find issues assigned to me in Jira and send summary to Telegram",
+    "issues":[]
+  }'
+```
+
+## File upload flow (separate from messaging)
+1. Upload file:
+```bash
+curl -X POST http://localhost:8000/upload \
+  -F "user_id=test-user" \
+  -F "file=@notes.txt;type=text/plain"
+```
+2. Check status:
+```bash
+curl http://localhost:8000/upload/<file_id>/status
+```
+3. Use file in conversation:
+```bash
+curl -X POST http://localhost:8000/qa-intake \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id":"test-user",
+    "instruction":"Answer based on uploaded file",
+    "file_id":"<file_id>",
     "issues":[]
   }'
 ```

@@ -30,6 +30,9 @@ flowchart TB
     Graph --> Cache[Redis Cache/Rate Limit]
     Graph --> Memory[Conversation Memory Manager]
     Memory --> Mongo[MongoDB]
+    API --> Upload[Upload Pipeline]
+    Upload --> Cache
+    Upload --> Qdrant
     Exec --> Jira[Jira Connector]
     Exec --> Slack[Slack Connector]
 ```
@@ -72,6 +75,24 @@ sequenceDiagram
     G->>M: store user/assistant messages + tools used + request/response
     G->>M: compact history (summary + recent window) if needed
     A-->>U: final response
+
+## 5.1 Upload Lifecycle
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as API
+    participant R as Redis
+    participant Q as Qdrant
+
+    U->>A: POST /upload (file)
+    A->>R: file_status:{file_id}=initiated
+    A->>R: upload_complete
+    A->>R: embedding (x%)
+    A->>R: saving_to_qdrant
+    A->>Q: upsert chunks with payload.file_id
+    A->>R: ready
+    A-->>U: file_id
+```
 ```
 
 ## 5. Action Planner and DAG

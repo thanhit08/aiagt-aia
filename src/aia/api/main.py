@@ -1,6 +1,4 @@
-import csv
 import hashlib
-import io
 import json
 from uuid import uuid4
 
@@ -29,43 +27,16 @@ graph = build_graph(
 )
 
 
-def _parse_upload(file: UploadFile, content: bytes) -> list[dict]:
+def _parse_upload(file: UploadFile, content: bytes) -> list[str]:
     ct = file.content_type or ""
     text = content.decode("utf-8", errors="ignore")
 
-    if ct == "text/csv" or file.filename.lower().endswith(".csv"):
-        reader = csv.DictReader(io.StringIO(text))
-        issues: list[dict] = []
-        for idx, row in enumerate(reader, start=1):
-            issues.append(
-                {
-                    "issue_id": str(row.get("id", idx)),
-                    "title": str(row.get("title", f"Issue {idx}")).strip(),
-                    "description": str(row.get("description", "")).strip() or "N/A",
-                    "steps": str(row.get("steps", "N/A")).strip(),
-                    "severity": str(row.get("severity", "unknown")).strip().lower(),
-                }
-            )
-        return issues
-
-    if ct in {"text/plain", "text/markdown"} or any(
-        file.filename.lower().endswith(ext) for ext in [".txt", ".md"]
+    if ct in {"text/plain", "text/markdown", "text/csv"} or any(
+        file.filename.lower().endswith(ext) for ext in [".txt", ".md", ".csv"]
     ):
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines:
-            return []
-        return [
-            {
-                "issue_id": str(i + 1),
-                "title": line[:120],
-                "description": line,
-                "steps": "N/A",
-                "severity": "unknown",
-            }
-            for i, line in enumerate(lines)
-        ]
+        return [line.strip() for line in text.splitlines() if line.strip()]
 
-    raise HTTPException(status_code=415, detail="Unsupported file type for this v1 API.")
+    raise HTTPException(status_code=415, detail="Unsupported file type for upload.")
 
 
 @app.get("/health")
@@ -86,6 +57,7 @@ class IntakeJsonRequest(BaseModel):
     instruction: str = Field(min_length=3)
     issues: list[dict] = Field(default_factory=list)
     conversation_id: str | None = None
+    file_id: str | None = None
 
 
 @app.post("/qa-intake")
@@ -95,7 +67,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     if current > settings.redis_rate_limit_per_minute:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
 
-    cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.issues)
+    cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.issues, payload.file_id)
     cached = cache_store.get_json(cache_key)
     if cached is not None:
         return {**cached, "cached": True}
@@ -117,6 +89,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         "instruction": merged_instruction,
         "parsed_issues": payload.issues,
         "user_id": payload.user_id,
+        "file_id": payload.file_id,
     }
 
     conversation_store.append_message(
@@ -173,35 +146,129 @@ def _register_upload_route() -> None:
     except Exception:
         return
 
-    @app.post("/qa-intake-upload")
-    async def qa_intake_upload(
+    @app.post("/upload")
+    async def upload_file(
         file: UploadFile = File(...),
         user_id: str = Form(...),
-        instruction: str = Form(...),
     ) -> dict:
+        file_id = _file_id_from_filename(file.filename)
+        status_key = _file_status_key(file_id)
+        cache_store.set_json(
+            status_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "state": "initiated",
+                "progress": 0,
+                "user_id": user_id,
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
+
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-        parsed_issues = _parse_upload(file, content)
-        request_id = str(uuid4())
-        state = {
-            "request_id": request_id,
-            "instruction": instruction,
-            "parsed_issues": parsed_issues,
-            "user_id": user_id,
-        }
-        result = graph.invoke(state)
-        return result["final_response"]
+        chunks = _parse_upload(file, content)
+        cache_store.set_json(
+            status_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "state": "upload_complete",
+                "progress": 20,
+                "user_id": user_id,
+                "chunks": len(chunks),
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
+        cache_store.set_json(
+            status_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "state": "embedding",
+                "progress": 60,
+                "user_id": user_id,
+                "chunks": len(chunks),
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
+
+        cache_store.set_json(
+            status_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "state": "saving_to_qdrant",
+                "progress": 85,
+                "user_id": user_id,
+                "chunks": len(chunks),
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
+        try:
+            upsert_result = vector_store.upsert_chunks(file_id=file_id, chunks=chunks)
+        except Exception as exc:
+            cache_store.set_json(
+                status_key,
+                {
+                    "file_id": file_id,
+                    "filename": file.filename,
+                    "state": "failed",
+                    "progress": 100,
+                    "user_id": user_id,
+                    "error": str(exc),
+                },
+                ttl_seconds=settings.redis_file_status_ttl_seconds,
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to store file in vector db: {exc}")
+
+        cache_store.set_json(
+            status_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "state": "ready",
+                "progress": 100,
+                "user_id": user_id,
+                "chunks": len(chunks),
+                "vector_store": upsert_result,
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
+
+        return {"file_id": file_id, "status": "ready", "chunks": len(chunks)}
+
+    @app.get("/upload/{file_id}/status")
+    def upload_status(file_id: str) -> dict:
+        status = cache_store.get_json(_file_status_key(file_id))
+        if not status:
+            raise HTTPException(status_code=404, detail="File status not found.")
+        return status
 
 
 _register_upload_route()
 
 
-def _response_cache_key(user_id: str, instruction: str, issues: list[dict]) -> str:
-    payload = json.dumps({"u": user_id, "i": instruction, "x": issues}, ensure_ascii=False, sort_keys=True)
+def _response_cache_key(user_id: str, instruction: str, issues: list[dict], file_id: str | None) -> str:
+    payload = json.dumps(
+        {"u": user_id, "i": instruction, "x": issues, "f": file_id or ""},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"resp:{digest}"
+
+
+def _file_id_from_filename(filename: str) -> str:
+    normalized = (filename or "").strip().lower()
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return digest[:24]
+
+
+def _file_status_key(file_id: str) -> str:
+    return f"file_status:{file_id}"
 
 
 def _merge_instruction_with_context(

@@ -53,6 +53,29 @@ class QdrantVectorStore:
             timeout=20.0,
             headers=headers,
         )
+        self._upload_collection = settings.qdrant_upload_collection
+        self._ensure_collection(self._upload_collection)
+
+    def upsert_chunks(self, *, file_id: str, chunks: list[str]) -> dict[str, Any]:
+        points = []
+        for idx, chunk in enumerate(chunks):
+            # Deterministic lightweight vector for local testability without embedding dependency.
+            val = float((abs(hash(chunk)) % 1000) / 1000.0)
+            points.append(
+                {
+                    "id": abs(hash(f"{file_id}:{idx}")) % (10**12),
+                    "vector": [val],
+                    "payload": {
+                        "file_id": file_id,
+                        "chunk_index": idx,
+                        "text": chunk,
+                    },
+                }
+            )
+        payload = {"points": points}
+        resp = self._client.put(f"/collections/{self._upload_collection}/points", json=payload)
+        resp.raise_for_status()
+        return {"status": "ok", "stored_chunks": len(chunks), "file_id": file_id}
 
     def search(
         self,
@@ -61,11 +84,22 @@ class QdrantVectorStore:
         query_text: str,
         top_k: int,
         min_score: float,
+        file_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        # Lightweight fallback search for local testing: scroll recent points.
         hits: list[dict[str, Any]] = []
         for collection in collections:
-            payload = {"limit": top_k, "with_payload": True, "with_vector": False}
+            filter_payload: dict[str, Any] | None = None
+            if file_id:
+                filter_payload = {
+                    "must": [{"key": "file_id", "match": {"value": file_id}}],
+                }
+            payload = {
+                "limit": top_k,
+                "with_payload": True,
+                "with_vector": False,
+            }
+            if filter_payload:
+                payload["filter"] = filter_payload
             resp = self._client.post(f"/collections/{collection}/points/scroll", json=payload)
             if resp.status_code >= 400:
                 continue
@@ -81,6 +115,14 @@ class QdrantVectorStore:
                     }
                 )
         return hits[:top_k]
+
+    def _ensure_collection(self, name: str) -> None:
+        resp = self._client.get(f"/collections/{name}")
+        if resp.status_code == 200:
+            return
+        payload = {"vectors": {"size": 1, "distance": "Cosine"}}
+        create = self._client.put(f"/collections/{name}", json=payload)
+        create.raise_for_status()
 
 
 class JiraApiClient:

@@ -10,6 +10,9 @@ class LLMClient(Protocol):
 
 
 class VectorStore(Protocol):
+    def upsert_chunks(self, *, file_id: str, chunks: list[str]) -> dict[str, Any]:
+        """Store file chunks into vector database with file_id payload."""
+
     def search(
         self,
         *,
@@ -17,6 +20,7 @@ class VectorStore(Protocol):
         query_text: str,
         top_k: int,
         min_score: float,
+        file_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return ranked hits from Qdrant."""
 

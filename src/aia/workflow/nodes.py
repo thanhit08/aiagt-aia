@@ -43,11 +43,15 @@ def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
     query_spec = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
     if not isinstance(query_spec, dict):
         query_spec = {}
+    collections = query_spec.get("collections", ["taxonomy", "rules", "examples"])
+    if state.get("file_id") and "uploaded_files" not in collections:
+        collections = ["uploaded_files"] + collections
     hits = deps.vector_store.search(
-        collections=query_spec.get("collections", ["taxonomy", "rules", "examples"]),
+        collections=collections,
         query_text=query_spec.get("query_text", state["instruction"]),
         top_k=int(query_spec.get("top_k", 5)),
         min_score=float(query_spec.get("min_score", 0.72)),
+        file_id=state.get("file_id"),
     )
     return {"rag_context": {"enabled": True, "query_spec": query_spec, "hits": hits}}
 

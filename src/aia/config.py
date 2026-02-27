@@ -20,6 +20,7 @@ class Settings:
     qdrant_url: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY", "")
     qdrant_collections: str = os.getenv("QDRANT_COLLECTIONS", "taxonomy,rules,examples")
+    qdrant_upload_collection: str = os.getenv("QDRANT_UPLOAD_COLLECTION", "uploaded_files")
 
     jira_base_url: str = os.getenv("JIRA_BASE_URL", "")
     jira_email: str = os.getenv("JIRA_EMAIL", "")
@@ -38,6 +39,7 @@ class Settings:
     redis_enabled: bool = _env_bool("REDIS_ENABLED", False)
     redis_response_ttl_seconds: int = int(os.getenv("REDIS_RESPONSE_TTL_SECONDS", "300"))
     redis_rate_limit_per_minute: int = int(os.getenv("REDIS_RATE_LIMIT_PER_MINUTE", "60"))
+    redis_file_status_ttl_seconds: int = int(os.getenv("REDIS_FILE_STATUS_TTL_SECONDS", "86400"))
 
     mongo_enabled: bool = _env_bool("MONGO_ENABLED", False)
     mongo_url: str = os.getenv("MONGO_URL", "")
