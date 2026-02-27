@@ -172,3 +172,19 @@ AIA is a LangGraph-driven workflow behind a FastAPI endpoint. It performs reques
 ## 12. Open Decisions
 - Queue-based background execution rollout timing.
 - Human approval threshold policy for low-confidence outputs.
+
+## 13. v1 Implementation Assets
+- Schemas and prompt templates are versioned in `specs/v1/`.
+- Primary contracts:
+  - `specs/v1/schemas/enriched_task.schema.json`
+  - `specs/v1/schemas/classification_output.schema.json`
+  - `specs/v1/schemas/route_plan.schema.json`
+  - `specs/v1/schemas/final_response.schema.json`
+- Prompt templates:
+  - `specs/v1/prompts/enrichment.system.md`
+  - `specs/v1/prompts/rag-query-builder.system.md`
+  - `specs/v1/prompts/classification.system.md`
+  - `specs/v1/prompts/orchestrator-routing.system.md`
+  - `specs/v1/prompts/slack-summary.system.md`
+  - `specs/v1/prompts/jira-ticket.system.md`
+  - `specs/v1/prompts/duplicate-check.system.md`

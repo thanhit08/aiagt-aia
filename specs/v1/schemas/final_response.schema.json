@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aia.local/schemas/v1/final_response.schema.json",
+  "title": "FinalResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "summary_posted",
+    "tickets_created",
+    "duplicates_skipped",
+    "slack_url",
+    "jira_urls",
+    "trace_id"
+  ],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "summary_posted": { "type": "boolean" },
+    "tickets_created": { "type": "integer", "minimum": 0 },
+    "duplicates_skipped": { "type": "integer", "minimum": 0 },
+    "slack_url": { "type": "string", "minLength": 0, "maxLength": 2048 },
+    "jira_urls": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+    },
+    "trace_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    }
+  }
+}

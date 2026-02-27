@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aia.local/schemas/v1/enriched_task.schema.json",
+  "title": "EnrichedTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_type",
+    "requires_slack",
+    "requires_jira",
+    "confidence_threshold",
+    "output_tone",
+    "routing_hints",
+    "rag_query_seed"
+  ],
+  "properties": {
+    "task_type": {
+      "type": "string",
+      "enum": ["accuracy_filter"]
+    },
+    "requires_slack": { "type": "boolean" },
+    "requires_jira": { "type": "boolean" },
+    "confidence_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "output_tone": {
+      "type": "string",
+      "enum": ["executive", "neutral", "technical"]
+    },
+    "routing_hints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "enum": [
+          "high_severity_first",
+          "dedupe_before_create",
+          "strict_schema",
+          "risk_focus"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "rag_query_seed": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 1000
+    }
+  }
+}

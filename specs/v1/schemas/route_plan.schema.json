@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aia.local/schemas/v1/route_plan.schema.json",
+  "title": "RoutePlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_slack", "run_jira", "slack_prompt", "jira_prompt"],
+  "properties": {
+    "run_slack": { "type": "boolean" },
+    "run_jira": { "type": "boolean" },
+    "slack_prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "jira_prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "parallel": { "type": "boolean", "const": true }
+  }
+}
