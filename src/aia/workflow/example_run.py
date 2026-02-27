@@ -22,7 +22,6 @@ def main() -> None:
         {
             "request_id": "req-001",
             "instruction": "Find issues assigned to me in Jira and post to Slack.",
-            "parsed_issues": [],
         }
     )
     print(result["final_response"])

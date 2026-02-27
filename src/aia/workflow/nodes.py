@@ -37,7 +37,6 @@ def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
     user_prompt = json.dumps(
         {
             "enriched_task": state["enriched_task"],
-            "issue_batch": state.get("parsed_issues", []),
         }
     )
     query_spec = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
@@ -64,7 +63,6 @@ def answer_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
     user_prompt = json.dumps(
         {
             "instruction": state["instruction"],
-            "parsed_issues": state.get("parsed_issues", []),
             "rag_context": state.get("rag_context", {}),
             "enriched_task": state["enriched_task"],
         },

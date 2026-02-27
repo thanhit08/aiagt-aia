@@ -55,7 +55,6 @@ def get_conversation(conversation_id: str) -> dict:
 class IntakeJsonRequest(BaseModel):
     user_id: str = Field(min_length=1)
     instruction: str = Field(min_length=3)
-    issues: list[dict] = Field(default_factory=list)
     conversation_id: str | None = None
     file_id: str | None = None
 
@@ -67,7 +66,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     if current > settings.redis_rate_limit_per_minute:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
 
-    cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.issues, payload.file_id)
+    cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.file_id)
     cached = cache_store.get_json(cache_key)
     if cached is not None:
         return {**cached, "cached": True}
@@ -87,7 +86,6 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     state = {
         "request_id": request_id,
         "instruction": merged_instruction,
-        "parsed_issues": payload.issues,
         "user_id": payload.user_id,
         "file_id": payload.file_id,
     }
@@ -270,9 +268,9 @@ def _register_upload_route() -> None:
 _register_upload_route()
 
 
-def _response_cache_key(user_id: str, instruction: str, issues: list[dict], file_id: str | None) -> str:
+def _response_cache_key(user_id: str, instruction: str, file_id: str | None) -> str:
     payload = json.dumps(
-        {"u": user_id, "i": instruction, "x": issues, "f": file_id or ""},
+        {"u": user_id, "i": instruction, "f": file_id or ""},
         ensure_ascii=False,
         sort_keys=True,
     )

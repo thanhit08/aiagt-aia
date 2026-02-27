@@ -7,7 +7,6 @@ class WorkflowState(TypedDict, total=False):
     instruction: str
     file_id: str
     trace_id: str
-    parsed_issues: list[dict]
     enriched_task: dict
     rag_context: dict
     answer: str
