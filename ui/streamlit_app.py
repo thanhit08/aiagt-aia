@@ -1,4 +1,3 @@
-import json
 import uuid
 
 import httpx
@@ -91,20 +90,12 @@ with col_b:
         value="Find issues assigned to me in Jira and send a summary to Telegram.",
         height=120,
     )
-    issues_json = st.text_area(
-        "Issues JSON (optional)",
-        value="[]",
-        height=120,
-    )
-
     if st.button("Send /qa-intake"):
         try:
-            issues = json.loads(issues_json or "[]")
             payload = {
                 "user_id": user_id,
                 "conversation_id": st.session_state.conversation_id,
                 "instruction": instruction,
-                "issues": issues,
             }
             if st.session_state.last_file_id:
                 payload["file_id"] = st.session_state.last_file_id
@@ -142,4 +133,3 @@ for idx, row in enumerate(st.session_state.history[-10:], start=1):
         st.code(row["instruction"])
         st.write("Response:")
         st.json(row["response"])
-
