@@ -42,6 +42,7 @@ docker run -p 6333:6333 qdrant/qdrant
 - `GET /health`
 - `GET /conversation/{conversation_id}` (inspect stored conversation/messages/tools)
 - `POST /upload` (file ingestion pipeline; returns `file_id`)
+- `GET /upload/{file_id}` (file metadata from Redis)
 - `GET /upload/{file_id}/status` (check ingest progress in Redis)
 - `POST /qa-intake` (JSON)
 
@@ -67,6 +68,10 @@ curl -X POST http://localhost:8000/upload \
 2. Check status:
 ```bash
 curl http://localhost:8000/upload/<file_id>/status
+```
+2.1 Get metadata:
+```bash
+curl http://localhost:8000/upload/<file_id>
 ```
 3. Use file in conversation:
 ```bash
@@ -115,3 +120,15 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
 - CI: `.github/workflows/ci.yml`
 - CD: `.github/workflows/cd.yml`
 - Optional Render auto-deploy via `RENDER_DEPLOY_HOOK_URL`
+
+## Streamlit UI tester
+Run:
+```bash
+streamlit run ui/streamlit_app.py
+```
+Features:
+- upload file
+- check upload status
+- check upload metadata
+- send `/qa-intake` with `conversation_id` and optional `file_id`
+- inspect conversation

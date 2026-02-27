@@ -153,6 +153,18 @@ def _register_upload_route() -> None:
     ) -> dict:
         file_id = _file_id_from_filename(file.filename)
         status_key = _file_status_key(file_id)
+        meta_key = _file_meta_key(file_id)
+        cache_store.set_json(
+            meta_key,
+            {
+                "file_id": file_id,
+                "filename": file.filename,
+                "user_id": user_id,
+                "content_type": file.content_type or "application/octet-stream",
+                "status_key": status_key,
+            },
+            ttl_seconds=settings.redis_file_status_ttl_seconds,
+        )
         cache_store.set_json(
             status_key,
             {
@@ -240,6 +252,13 @@ def _register_upload_route() -> None:
 
         return {"file_id": file_id, "status": "ready", "chunks": len(chunks)}
 
+    @app.get("/upload/{file_id}")
+    def upload_meta(file_id: str) -> dict:
+        meta = cache_store.get_json(_file_meta_key(file_id))
+        if not meta:
+            raise HTTPException(status_code=404, detail="File metadata not found.")
+        return meta
+
     @app.get("/upload/{file_id}/status")
     def upload_status(file_id: str) -> dict:
         status = cache_store.get_json(_file_status_key(file_id))
@@ -269,6 +288,10 @@ def _file_id_from_filename(filename: str) -> str:
 
 def _file_status_key(file_id: str) -> str:
     return f"file_status:{file_id}"
+
+
+def _file_meta_key(file_id: str) -> str:
+    return f"file_meta:{file_id}"
 
 
 def _merge_instruction_with_context(

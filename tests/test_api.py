@@ -86,6 +86,12 @@ def test_upload_and_status_and_query_with_file_id() -> None:
     status_body = status_resp.json()
     assert status_body.get("state") in {"ready", "saving_to_qdrant", "embedding", "upload_complete", "initiated"}
 
+    meta_resp = client.get(f"/upload/{file_id}")
+    assert meta_resp.status_code == 200
+    meta_body = meta_resp.json()
+    assert meta_body.get("file_id") == file_id
+    assert "filename" in meta_body
+
     qa_resp = client.post(
         "/qa-intake",
         json={
