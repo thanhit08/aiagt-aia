@@ -53,8 +53,7 @@ curl -X POST http://localhost:8000/qa-intake \
   -d '{
     "user_id":"test-user",
     "conversation_id":"optional-conv-id",
-    "instruction":"Find issues assigned to me in Jira and send summary to Telegram",
-    "issues":[]
+    "instruction":"Find issues assigned to me in Jira and send summary to Telegram"
   }'
 ```
 
@@ -80,8 +79,7 @@ curl -X POST http://localhost:8000/qa-intake \
   -d '{
     "user_id":"test-user",
     "instruction":"Answer based on uploaded file",
-    "file_id":"<file_id>",
-    "issues":[]
+    "file_id":"<file_id>"
   }'
 ```
 

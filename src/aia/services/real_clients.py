@@ -138,8 +138,12 @@ class JiraApiClient:
 
     def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
         if action == "jira_search_issues":
-            resp = self._client.post("/rest/api/3/search", json=params)
-            return _jira_response(action, resp)
+            # Jira Cloud deprecated /search for some tenants; prefer /search/jql and fallback.
+            primary = self._client.post("/rest/api/3/search/jql", json=params)
+            if primary.status_code in {404, 405, 410}:
+                fallback = self._client.post("/rest/api/3/search", json=params)
+                return _jira_response(action, fallback)
+            return _jira_response(action, primary)
         if action == "jira_get_issue":
             issue_key = params["issue_key"]
             resp = self._client.get(f"/rest/api/3/issue/{issue_key}")
@@ -234,8 +238,9 @@ class TelegramApiClient:
                     "error": "chat_id is required (or set TELEGRAM_DEFAULT_CHAT_ID)",
                 }
             resp = self._client.post("/sendMessage", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            if resp.status_code >= 400:
+                return _telegram_error(action, resp)
+            data = _safe_json(resp)
             if not data.get("ok", False):
                 return {
                     "system": "telegram",
@@ -247,8 +252,9 @@ class TelegramApiClient:
 
         if action == "telegram_get_updates":
             resp = self._client.post("/getUpdates", json=params or {})
-            resp.raise_for_status()
-            data = resp.json()
+            if resp.status_code >= 400:
+                return _telegram_error(action, resp)
+            data = _safe_json(resp)
             if not data.get("ok", False):
                 return {
                     "system": "telegram",
@@ -276,6 +282,37 @@ def _jira_response(action: str, resp: httpx.Response) -> dict[str, Any]:
         except Exception:
             data = {"raw": resp.text}
     return {"system": "jira", "action": action, "status": "success", "data": data}
+
+
+def _safe_json(resp: httpx.Response) -> dict[str, Any]:
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            return data
+        return {"raw": data}
+    except Exception:
+        return {"raw": resp.text}
+
+
+def _telegram_error(action: str, resp: httpx.Response) -> dict[str, Any]:
+    data = _safe_json(resp)
+    desc = data.get("description")
+    if not isinstance(desc, str) or not desc.strip():
+        desc = resp.text[:400] or f"http_{resp.status_code}"
+    hint = ""
+    lower = desc.lower()
+    if "chat not found" in lower:
+        hint = " Verify TELEGRAM_DEFAULT_CHAT_ID and send a message to the bot first."
+    elif "bot was blocked" in lower:
+        hint = " Unblock the bot from Telegram and retry."
+    elif "user is deactivated" in lower:
+        hint = " The destination account is deactivated."
+    return {
+        "system": "telegram",
+        "action": action,
+        "status": "failed",
+        "error": f"http_{resp.status_code}: {desc}{hint}",
+    }
 
 
 def _extract_json(text: str) -> dict[str, Any] | list[Any]:

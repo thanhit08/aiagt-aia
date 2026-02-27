@@ -16,15 +16,6 @@ def test_qa_intake_csv() -> None:
     payload = {
         "user_id": "u1",
         "instruction": "Find accuracy issues and route.",
-        "issues": [
-            {
-                "issue_id": "1",
-                "title": "Calc mismatch",
-                "description": "Wrong numeric output",
-                "steps": "Run scenario",
-                "severity": "critical",
-            }
-        ],
     }
     resp = client.post("/qa-intake", json=payload)
     assert resp.status_code == 200
@@ -39,7 +30,6 @@ def test_slack_request_returns_not_supported_message() -> None:
     payload = {
         "user_id": "u1",
         "instruction": "Post this update to Slack",
-        "issues": [],
     }
     resp = client.post("/qa-intake", json=payload)
     assert resp.status_code == 200
@@ -54,7 +44,6 @@ def test_get_conversation() -> None:
     create_payload = {
         "user_id": "u-conv",
         "instruction": "Create a conversation record.",
-        "issues": [],
     }
     create_resp = client.post("/qa-intake", json=create_payload)
     assert create_resp.status_code == 200
@@ -97,7 +86,6 @@ def test_upload_and_status_and_query_with_file_id() -> None:
         json={
             "user_id": "u-file",
             "instruction": "Use the uploaded file to answer",
-            "issues": [],
             "file_id": file_id,
         },
     )
