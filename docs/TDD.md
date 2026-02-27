@@ -23,6 +23,7 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 - Observability: LangSmith + Langfuse
 - Connectors: Jira REST + Slack Web API
 - Redis: response cache + rate limiting
+- MongoDB: conversation/message persistence + request/response logs
 
 ### 3.1 Runtime Connector Status
 - Jira connector: active.
@@ -117,6 +118,28 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 - Rate key: `rate:{user_id}` with 60-second window.
 - If Redis unavailable, fallback to in-memory implementation.
 
+### 6.12 Conversation Store (MongoDB)
+- Collections:
+  - `conversations`: summary + message array + metadata
+  - `request_logs`: raw request/response records with correlation IDs
+- Message record fields:
+  - `role` (`user` or `assistant`)
+  - `content`
+  - `tools_used[]`
+  - `meta` (request_id, timing, optional tags)
+- API supports `conversation_id`; creates one when absent.
+
+### 6.13 Context Window Algorithm (Chosen Strategy)
+- Strategy selected: `rolling summary + recent window`.
+- Rules:
+  - Keep last `CONTEXT_RECENT_MESSAGES` messages verbatim.
+  - When total messages > `CONTEXT_MAX_MESSAGES`, summarize older block into `summary`.
+  - Replace old block with summary and retained recent messages.
+- Benefits:
+  - bounded token usage
+  - continuity of long-running conversations
+  - simple deterministic storage model
+
 ## 7. Data Models
 ### 7.1 Enriched Task (Logical)
 ```json
@@ -147,6 +170,26 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
     {"system": "slack", "action": "slack_post_message", "status": "failed", "error": "channel_not_found"}
   ],
   "errors": []
+}
+```
+
+### 7.3 Conversation Document (Mongo)
+```json
+{
+  "_id": "conversation_id",
+  "user_id": "string",
+  "summary": "string",
+  "messages": [
+    {
+      "ts": "ISO-8601",
+      "role": "user|assistant",
+      "content": "string",
+      "tools_used": ["jira:jira_search_issues", "telegram:telegram_send_message"],
+      "meta": {"request_id": "string"}
+    }
+  ],
+  "created_at": "ISO-8601",
+  "updated_at": "ISO-8601"
 }
 ```
 

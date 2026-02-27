@@ -57,6 +57,8 @@ Users need one endpoint that can answer questions and perform operational action
 - Slack action execution (post/update/thread/search/channel/member actions).
 - Unified response with action results and trace metadata.
 - Redis-backed caching and rate limiting.
+- MongoDB-backed conversation memory and request/response audit logs.
+- Conversation history management with context window control.
 
 ### 6.2 Out of Scope (Current Phase)
 - Autonomous multi-day workflow execution.
@@ -75,6 +77,10 @@ Users need one endpoint that can answer questions and perform operational action
 - FR-10 Safety Controls: require confirmation policy for destructive/high-impact actions.
 - FR-11 Observability: trace all routing decisions and external calls.
 - FR-12 Graceful Degradation: partial tool failures must not drop core answer.
+- FR-13 Conversation Model: persist conversation, messages (user + assistant), and tools used per message.
+- FR-14 Request/Response Persistence: store each request and final response in MongoDB.
+- FR-15 Context Injection: include conversation summary + recent messages in new requests.
+- FR-16 History Compaction: apply rolling-summary algorithm when message history exceeds threshold.
 
 ## 8. Jira and Slack Action Catalog
 ### 8.1 Jira Action Types
@@ -106,6 +112,7 @@ Users need one endpoint that can answer questions and perform operational action
 - NFR-04 Security: per-action authorization, secret management, redaction.
 - NFR-05 Auditability: every action includes request correlation IDs.
 - NFR-06 Redis-backed controls: response caching and per-user throttling.
+- NFR-07 Conversation memory scaling: long-running conversations remain bounded and performant.
 
 ## 10. Data Contracts
 ### 10.1 Enriched Task (Example)
@@ -152,6 +159,9 @@ Users need one endpoint that can answer questions and perform operational action
 - AC-04 Multiple actions across Jira/Slack execute with deterministic ordering and parallelization where safe.
 - AC-05 High-risk actions follow safety policy.
 - AC-06 Core answer is always returned even with partial action failures.
+- AC-07 Conversation can continue across multiple requests via `conversation_id`.
+- AC-08 Each assistant message records tools used.
+- AC-09 History length remains bounded while preserving key context through summary.
 
 ## 12. Demo Pass Criteria
 - D-01 Jira assignee search.
@@ -159,6 +169,8 @@ Users need one endpoint that can answer questions and perform operational action
 - D-03 Slack message post + update.
 - D-04 Combined Jira + Slack request in one query.
 - D-05 Trace log includes action plan and outcomes.
+- D-06 Conversation replay shows user/assistant turns and tool usage.
+- D-07 Long conversation triggers summary compaction without losing continuity.
 
 ## 13. Traceability to TDD
 Implementation mapping is defined in `docs/TDD.md` section "PRD to TDD Traceability Matrix".

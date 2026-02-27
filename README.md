@@ -22,6 +22,8 @@ uvicorn aia.api.main:app --host 0.0.0.0 --port 8000
 - `QDRANT_URL=http://qdrant:6333`
 - `REDIS_ENABLED=true`
 - `REDIS_URL=redis://redis:6379/0`
+- `MONGO_ENABLED=true`
+- `MONGO_URL=mongodb://mongo:27017`
 3. Start everything:
 ```bash
 docker compose up --build
@@ -47,6 +49,7 @@ curl -X POST http://localhost:8000/qa-intake \
   -H "Content-Type: application/json" \
   -d '{
     "user_id":"test-user",
+    "conversation_id":"optional-conv-id",
     "instruction":"Find issues assigned to me in Jira and send summary to Telegram",
     "issues":[]
   }'
@@ -74,6 +77,14 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
 - Response cache for repeated requests (`REDIS_RESPONSE_TTL_SECONDS`).
 - Per-user rate limiting (`REDIS_RATE_LIMIT_PER_MINUTE`).
 - Safe fallback to in-memory cache when Redis is unavailable.
+
+## MongoDB conversation memory
+- Stores conversations, user/assistant messages, and tools used per message.
+- Stores raw request/response logs for audit.
+- Context algorithm: rolling summary + recent window.
+- Tune with:
+  - `CONTEXT_RECENT_MESSAGES`
+  - `CONTEXT_MAX_MESSAGES`
 
 ## CI/CD
 - CI: `.github/workflows/ci.yml`

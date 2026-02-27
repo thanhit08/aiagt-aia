@@ -1,6 +1,14 @@
 version: "3.9"
 
 services:
+  mongo:
+    image: mongo:7
+    container_name: aia-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
   redis:
     image: redis:7-alpine
     container_name: aia-redis
@@ -27,7 +35,9 @@ services:
     environment:
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
     depends_on:
+      - mongo
       - redis
       - qdrant
     ports:
@@ -37,3 +47,4 @@ services:
 volumes:
   qdrant_data:
   redis_data:
+  mongo_data:

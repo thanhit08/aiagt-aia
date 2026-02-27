@@ -39,6 +39,13 @@ class Settings:
     redis_response_ttl_seconds: int = int(os.getenv("REDIS_RESPONSE_TTL_SECONDS", "300"))
     redis_rate_limit_per_minute: int = int(os.getenv("REDIS_RATE_LIMIT_PER_MINUTE", "60"))
 
+    mongo_enabled: bool = _env_bool("MONGO_ENABLED", False)
+    mongo_url: str = os.getenv("MONGO_URL", "")
+    mongo_db_name: str = os.getenv("MONGO_DB_NAME", "aia")
+
+    context_recent_messages: int = int(os.getenv("CONTEXT_RECENT_MESSAGES", "8"))
+    context_max_messages: int = int(os.getenv("CONTEXT_MAX_MESSAGES", "20"))
+
 
 def load_settings() -> Settings:
     return Settings()

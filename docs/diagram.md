@@ -11,6 +11,7 @@ flowchart LR
     AIA --> OpenAI[OpenAI]
     AIA --> Qdrant[Qdrant]
     AIA --> Redis[Redis]
+    AIA --> Mongo[MongoDB]
     AIA --> Jira[Jira API]
     AIA --> Slack[Slack API]
     AIA --> Obs[LangSmith/Langfuse]
@@ -27,6 +28,8 @@ flowchart TB
     Graph --> Planner[Action Planner]
     Planner --> Exec[Action Executor]
     Graph --> Cache[Redis Cache/Rate Limit]
+    Graph --> Memory[Conversation Memory Manager]
+    Memory --> Mongo[MongoDB]
     Exec --> Jira[Jira Connector]
     Exec --> Slack[Slack Connector]
 ```
@@ -39,11 +42,13 @@ sequenceDiagram
     participant G as Graph
     participant L as LLM
     participant R as Qdrant
+    participant M as Mongo
     participant J as Jira
     participant S as Slack
 
     U->>A: instruction (+ optional file)
     A->>G: start
+    G->>M: load summary + recent messages
     G->>L: enrichment
     L-->>G: action_plans + route metadata
 
@@ -64,6 +69,8 @@ sequenceDiagram
     end
 
     G-->>A: answer + action_results + errors
+    G->>M: store user/assistant messages + tools used + request/response
+    G->>M: compact history (summary + recent window) if needed
     A-->>U: final response
 ```
 
@@ -100,6 +107,8 @@ flowchart TB
     API2 --> Qdrant
     API1 --> Redis
     API2 --> Redis
+    API1 --> Mongo
+    API2 --> Mongo
     API1 --> Jira
     API2 --> Jira
     API1 --> Slack

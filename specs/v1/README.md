@@ -5,8 +5,10 @@ This folder contains implementation-ready contracts for general query orchestrat
 ## Supported Interaction Pattern
 - User asks any question
 - Optional file/context provided
+- Optional conversation_id for multi-turn continuity
 - Enrichment generates `action_plans[]`
 - Optional RAG retrieval
+- Conversation summary + recent messages injected as context
 - Route planner validates actions
 - Executors run Jira/Slack actions
 - Aggregator returns answer + action results
@@ -24,3 +26,7 @@ This folder contains implementation-ready contracts for general query orchestrat
 
 ## Compatibility Note
 Legacy placeholder variable names may remain in some prompt templates to keep current code paths stable until executor refactor is complete.
+
+## Memory Strategy
+- Selected strategy: rolling summary + recent message window.
+- Long history is compacted into summary in MongoDB when threshold is exceeded.

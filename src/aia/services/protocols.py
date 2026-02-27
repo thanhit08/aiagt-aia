@@ -45,3 +45,33 @@ class CacheStore(Protocol):
 
     def increment_with_ttl(self, key: str, ttl_seconds: int) -> int:
         """Increment counter and set TTL when key is first seen."""
+
+
+class ConversationStore(Protocol):
+    def get_context(self, conversation_id: str, recent_limit: int) -> dict[str, Any]:
+        """Return summary + recent messages for conversation."""
+
+    def append_message(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        tools_used: list[str] | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Append one message to conversation."""
+
+    def log_request_response(self, payload: dict[str, Any]) -> None:
+        """Persist request/response entry."""
+
+    def maybe_compact(
+        self,
+        *,
+        conversation_id: str,
+        max_messages: int,
+        keep_recent: int,
+        summarize_fn,
+    ) -> None:
+        """Compact history using rolling summary strategy."""
