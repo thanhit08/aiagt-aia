@@ -27,6 +27,9 @@ class Settings:
 
     slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
 
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_default_chat_id: str = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
+
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
     langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "")
@@ -34,4 +37,3 @@ class Settings:
 
 def load_settings() -> Settings:
     return Settings()
-

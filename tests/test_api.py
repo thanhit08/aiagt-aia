@@ -32,3 +32,18 @@ def test_qa_intake_csv() -> None:
     assert "trace_id" in body
     assert "answer" in body
     assert "action_results" in body
+
+
+def test_slack_request_returns_not_supported_message() -> None:
+    payload = {
+        "user_id": "u1",
+        "instruction": "Post this update to Slack",
+        "issues": [],
+    }
+    resp = client.post("/qa-intake", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    slack_results = [r for r in body.get("action_results", []) if r.get("system") == "slack"]
+    if slack_results:
+        assert slack_results[0]["status"] == "failed"
+        assert "Telegram" in (slack_results[0].get("error") or "")

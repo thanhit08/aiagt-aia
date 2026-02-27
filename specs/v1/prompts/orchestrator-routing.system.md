@@ -11,5 +11,6 @@ Inputs:
 Rules:
 - Output JSON only.
 - Preserve action list semantics.
-- Validate that every action exists in supported catalog.
+- Validate that every action exists in supported catalog (jira, slack, telegram).
 - Set `parallel=true` when no dependencies conflict.
+

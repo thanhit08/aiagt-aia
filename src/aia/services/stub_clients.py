@@ -25,6 +25,16 @@ class StubLLMClient:
                     "depends_on": [],
                 }
             )
+        if "telegram" in text:
+            action_plans.append(
+                {
+                    "system": "telegram",
+                    "action": "telegram_send_message",
+                    "params": {"text": "Stub telegram result"},
+                    "risk_level": "low",
+                    "depends_on": [],
+                }
+            )
 
         if "enriched_task.schema.json" in text:
             return {
@@ -61,8 +71,8 @@ class StubSlackClient:
         return {
             "system": "slack",
             "action": action,
-            "status": "success",
-            "data": {"url": "https://slack.example.local/message/1", "params": params},
+            "status": "failed",
+            "error": "Slack integration is not supported yet in this environment. Please use Telegram.",
         }
 
 
@@ -75,3 +85,12 @@ class StubJiraClient:
             "data": {"url": "https://jira.example.local/browse/AIA-1", "params": params},
         }
 
+
+class StubTelegramClient:
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "system": "telegram",
+            "action": action,
+            "status": "success",
+            "data": {"message_id": 1, "chat_id": params.get("chat_id", "stub"), "params": params},
+        }

@@ -30,3 +30,7 @@ class JiraClient(Protocol):
     def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """Execute one Jira action and return structured output."""
 
+
+class TelegramClient(Protocol):
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Execute one Telegram action and return structured output."""

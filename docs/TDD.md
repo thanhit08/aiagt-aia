@@ -23,6 +23,11 @@ AIA is a query orchestration platform behind FastAPI. It supports general answer
 - Observability: LangSmith + Langfuse
 - Connectors: Jira REST + Slack Web API
 
+### 3.1 Runtime Connector Status
+- Jira connector: active.
+- Telegram connector: active.
+- Slack connector: intentionally disabled; Slack requests return deterministic fallback recommending Telegram.
+
 ## 4. PRD to TDD Traceability Matrix
 | PRD ID | Requirement Summary | TDD Section |
 | --- | --- | --- |

@@ -7,7 +7,7 @@ cp .env.example .env
 ```
 2. For real services, set:
 - `AIA_USE_REAL_SERVICES=true`
-- OpenAI/Jira/Slack credentials in `.env`
+- OpenAI/Jira/Telegram credentials in `.env`
 3. Install and run:
 ```bash
 pip install -e .
@@ -45,7 +45,7 @@ curl -X POST http://localhost:8000/qa-intake \
   -H "Content-Type: application/json" \
   -d '{
     "user_id":"test-user",
-    "instruction":"Find issues assigned to me in Jira and post summary to Slack",
+    "instruction":"Find issues assigned to me in Jira and send summary to Telegram",
     "issues":[]
   }'
 ```
@@ -53,7 +53,20 @@ curl -X POST http://localhost:8000/qa-intake \
 ## Real credentials required
 - OpenAI: `OPENAI_API_KEY`
 - Jira: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`
-- Slack: `SLACK_BOT_TOKEN`
+- Telegram: `TELEGRAM_BOT_TOKEN` (+ optional `TELEGRAM_DEFAULT_CHAT_ID`)
+
+## Telegram bot setup
+1. Create bot with `@BotFather` and copy token.
+2. Send at least one message to your bot from Telegram app.
+3. Get chat id via Bot API:
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
+```
+4. Put chat id into `.env` as `TELEGRAM_DEFAULT_CHAT_ID`.
+
+## Slack status
+- Slack actions currently return: `not supported yet`.
+- Response includes suggestion to use Telegram action `telegram_send_message`.
 
 ## CI/CD
 - CI: `.github/workflows/ci.yml`

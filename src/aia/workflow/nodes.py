@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from aia.models.contracts import ActionResult, EnrichedTask, FinalResponse, RoutePlan
-from aia.services.protocols import JiraClient, LLMClient, SlackClient, VectorStore
+from aia.services.protocols import JiraClient, LLMClient, SlackClient, TelegramClient, VectorStore
 from aia.workflow.prompts import load_prompt, render_template
 from aia.workflow.state import WorkflowState
 
@@ -14,6 +14,7 @@ class NodeDeps:
     vector_store: VectorStore
     slack: SlackClient
     jira: JiraClient
+    telegram: TelegramClient
 
 
 def intake_node(state: WorkflowState) -> WorkflowState:
@@ -101,7 +102,14 @@ def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
             if system == "jira":
                 result = deps.jira.execute_action(action=action, params=params)
             elif system == "slack":
-                result = deps.slack.execute_action(action=action, params=params)
+                result = {
+                    "system": "slack",
+                    "action": action or "slack_unknown",
+                    "status": "failed",
+                    "error": "Slack integration is not supported yet in this environment. Please use Telegram actions (telegram_send_message).",
+                }
+            elif system == "telegram":
+                result = deps.telegram.execute_action(action=action, params=params)
             else:
                 result = {
                     "system": system or "unknown",
@@ -133,4 +141,3 @@ def aggregate_node(state: WorkflowState) -> WorkflowState:
         errors=state.get("errors", []),
     ).model_dump()
     return {"final_response": final}
-

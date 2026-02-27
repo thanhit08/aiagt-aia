@@ -1,6 +1,17 @@
 from aia.config import load_settings
-from aia.services.real_clients import JiraApiClient, OpenAILLMClient, QdrantVectorStore, SlackApiClient
-from aia.services.stub_clients import StubJiraClient, StubLLMClient, StubSlackClient, StubVectorStore
+from aia.services.real_clients import (
+    JiraApiClient,
+    OpenAILLMClient,
+    QdrantVectorStore,
+    TelegramApiClient,
+)
+from aia.services.stub_clients import (
+    StubJiraClient,
+    StubLLMClient,
+    StubSlackClient,
+    StubTelegramClient,
+    StubVectorStore,
+)
 
 
 def build_clients():
@@ -9,8 +20,8 @@ def build_clients():
         return (
             OpenAILLMClient(settings),
             QdrantVectorStore(settings),
-            SlackApiClient(settings),
+            StubSlackClient(),
             JiraApiClient(settings),
+            TelegramApiClient(settings),
         )
-    return (StubLLMClient(), StubVectorStore(), StubSlackClient(), StubJiraClient())
-
+    return (StubLLMClient(), StubVectorStore(), StubSlackClient(), StubJiraClient(), StubTelegramClient())

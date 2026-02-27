@@ -1,6 +1,12 @@
 """Local scaffold runner with placeholder clients."""
 
-from aia.services.stub_clients import StubJiraClient, StubLLMClient, StubSlackClient, StubVectorStore
+from aia.services.stub_clients import (
+    StubJiraClient,
+    StubLLMClient,
+    StubSlackClient,
+    StubTelegramClient,
+    StubVectorStore,
+)
 from aia.workflow.graph import build_graph
 
 
@@ -10,6 +16,7 @@ def main() -> None:
         vector_store=StubVectorStore(),
         slack=StubSlackClient(),
         jira=StubJiraClient(),
+        telegram=StubTelegramClient(),
     )
     result = graph.invoke(
         {
@@ -23,4 +30,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

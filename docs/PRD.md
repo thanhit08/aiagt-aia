@@ -19,6 +19,11 @@ AIA is a general-purpose AI orchestration system that can:
 - Decide at runtime whether to retrieve knowledge from RAG.
 - Execute Jira and Slack actions inferred from user intent.
 
+### 2.1 Current Integration Status
+- Jira: supported.
+- Telegram: supported (recommended messaging channel).
+- Slack: temporarily not supported in runtime; when requested, system returns fallback guidance to use Telegram.
+
 ## 3. Problem Statement
 Users need one endpoint that can answer questions and perform operational actions across tools. Current pain points:
 - Natural-language requests mix search/read/write/update intentions.

@@ -21,7 +21,7 @@ class IntakeRequest(BaseModel):
 class ActionPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    system: str = Field(pattern=r"^(jira|slack)$")
+    system: str = Field(pattern=r"^(jira|slack|telegram)$")
     action: str = Field(min_length=3, max_length=80)
     params: dict = Field(default_factory=dict)
     risk_level: str = Field(pattern=r"^(low|medium|high)$")
@@ -50,7 +50,7 @@ class RoutePlan(BaseModel):
 class ActionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    system: str = Field(pattern=r"^(jira|slack)$")
+    system: str = Field(pattern=r"^(jira|slack|telegram)$")
     action: str = Field(min_length=3)
     status: str = Field(pattern=r"^(success|failed|skipped)$")
     data: dict = Field(default_factory=dict)
@@ -65,4 +65,3 @@ class FinalResponse(BaseModel):
     trace_id: str = Field(min_length=1, max_length=200)
     action_results: list[ActionResult] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
-

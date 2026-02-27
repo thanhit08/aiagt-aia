@@ -7,10 +7,11 @@ Rules:
 - Output JSON only.
 - Infer `task_type`.
 - Decide `requires_rag`.
-- Build `action_plans` for all requested Jira/Slack actions.
+- Build `action_plans` for all requested Jira/Slack/Telegram actions.
 - Include `risk_level` per action:
   - low: search/read/post/reply
   - medium: create/update/comment/assign
   - high: archive/delete/bulk-update
 - Set `depends_on` for ordered actions.
 - Preserve user intent exactly; do not invent destructive actions.
+

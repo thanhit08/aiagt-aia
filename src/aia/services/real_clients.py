@@ -168,6 +168,57 @@ class SlackApiClient:
         return {"system": "slack", "action": action, "status": "success", "data": data}
 
 
+class TelegramApiClient:
+    def __init__(self, settings: Settings) -> None:
+        if not settings.telegram_bot_token:
+            raise ValueError("TELEGRAM_BOT_TOKEN is required")
+        self._default_chat_id = settings.telegram_default_chat_id
+        self._client = httpx.Client(
+            base_url=f"https://api.telegram.org/bot{settings.telegram_bot_token}",
+            timeout=30.0,
+            headers={"Content-Type": "application/json"},
+        )
+
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        if action == "telegram_send_message":
+            payload = dict(params)
+            if "chat_id" not in payload and self._default_chat_id:
+                payload["chat_id"] = self._default_chat_id
+            if "chat_id" not in payload:
+                return {
+                    "system": "telegram",
+                    "action": action,
+                    "status": "failed",
+                    "error": "chat_id is required (or set TELEGRAM_DEFAULT_CHAT_ID)",
+                }
+            resp = self._client.post("/sendMessage", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok", False):
+                return {
+                    "system": "telegram",
+                    "action": action,
+                    "status": "failed",
+                    "error": str(data.get("description", "unknown")),
+                }
+            return {"system": "telegram", "action": action, "status": "success", "data": data.get("result", {})}
+
+        if action == "telegram_get_updates":
+            resp = self._client.post("/getUpdates", json=params or {})
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok", False):
+                return {
+                    "system": "telegram",
+                    "action": action,
+                    "status": "failed",
+                    "error": str(data.get("description", "unknown")),
+                }
+            return {"system": "telegram", "action": action, "status": "success", "data": data.get("result", [])}
+
+        raise ValueError(f"Unsupported Telegram action: {action}")
+
+
 def _jira_response(action: str, resp: httpx.Response) -> dict[str, Any]:
     if resp.status_code >= 400:
         return {
@@ -200,4 +251,3 @@ def _extract_json(text: str) -> dict[str, Any] | list[Any]:
     if not first_obj:
         raise ValueError("Model output is not valid JSON")
     return json.loads(first_obj.group(1))
-

@@ -17,12 +17,13 @@ load_dotenv()
 
 app = FastAPI(title="AIA API", version="0.1.0")
 
-llm, vector_store, slack, jira = build_clients()
+llm, vector_store, slack, jira, telegram = build_clients()
 graph = build_graph(
     llm=llm,
     vector_store=vector_store,
     slack=slack,
     jira=jira,
+    telegram=telegram,
 )
 
 

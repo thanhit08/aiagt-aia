@@ -1,6 +1,6 @@
 from typing import Any
 
-from aia.services.protocols import JiraClient, LLMClient, SlackClient, VectorStore
+from aia.services.protocols import JiraClient, LLMClient, SlackClient, TelegramClient, VectorStore
 from aia.workflow.nodes import (
     NodeDeps,
     aggregate_node,
@@ -20,8 +20,9 @@ def build_graph(
     vector_store: VectorStore,
     slack: SlackClient,
     jira: JiraClient,
+    telegram: TelegramClient,
 ) -> Any:
-    deps = NodeDeps(llm=llm, vector_store=vector_store, slack=slack, jira=jira)
+    deps = NodeDeps(llm=llm, vector_store=vector_store, slack=slack, jira=jira, telegram=telegram)
     try:
         from langgraph.graph import END, StateGraph
     except ImportError:
@@ -61,4 +62,3 @@ def _fallback_graph(deps: NodeDeps) -> Any:
             return current
 
     return _SimpleGraph()
-

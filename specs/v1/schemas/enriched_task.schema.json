@@ -23,7 +23,7 @@
         "additionalProperties": false,
         "required": ["system", "action", "params", "risk_level", "depends_on"],
         "properties": {
-          "system": {"type": "string", "enum": ["jira", "slack"]},
+          "system": {"type": "string", "enum": ["jira", "slack", "telegram"]},
           "action": {"type": "string", "minLength": 3, "maxLength": 80},
           "params": {"type": "object"},
           "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
@@ -36,3 +36,4 @@
     }
   }
 }
+
