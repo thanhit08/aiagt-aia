@@ -14,7 +14,22 @@ pip install -e .
 uvicorn aia.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## Qdrant local docker (no API key)
+## Docker Compose (recommended)
+`docker-compose.yml` already links `.env` using `env_file`.
+
+1. Ensure `.env` exists.
+2. For compose, set:
+- `QDRANT_URL=http://qdrant:6333`
+3. Start everything:
+```bash
+docker compose up --build
+```
+4. Stop:
+```bash
+docker compose down
+```
+
+## Qdrant local docker only (without compose)
 ```bash
 docker run -p 6333:6333 qdrant/qdrant
 ```
@@ -44,4 +59,3 @@ curl -X POST http://localhost:8000/qa-intake \
 - CI: `.github/workflows/ci.yml`
 - CD: `.github/workflows/cd.yml`
 - Optional Render auto-deploy via `RENDER_DEPLOY_HOOK_URL`
-
