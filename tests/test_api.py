@@ -47,3 +47,21 @@ def test_slack_request_returns_not_supported_message() -> None:
     if slack_results:
         assert slack_results[0]["status"] == "failed"
         assert "Telegram" in (slack_results[0].get("error") or "")
+
+
+def test_get_conversation() -> None:
+    create_payload = {
+        "user_id": "u-conv",
+        "instruction": "Create a conversation record.",
+        "issues": [],
+    }
+    create_resp = client.post("/qa-intake", json=create_payload)
+    assert create_resp.status_code == 200
+    conversation_id = create_resp.json().get("conversation_id")
+    assert conversation_id
+
+    fetch_resp = client.get(f"/conversation/{conversation_id}")
+    assert fetch_resp.status_code == 200
+    data = fetch_resp.json()
+    assert data.get("conversation_id") == conversation_id
+    assert isinstance(data.get("messages"), list)

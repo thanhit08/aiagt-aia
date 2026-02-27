@@ -40,6 +40,7 @@ docker run -p 6333:6333 qdrant/qdrant
 
 ## Endpoints
 - `GET /health`
+- `GET /conversation/{conversation_id}` (inspect stored conversation/messages/tools)
 - `POST /qa-intake` (JSON)
 - `POST /qa-intake-upload` (multipart; requires `python-multipart`)
 

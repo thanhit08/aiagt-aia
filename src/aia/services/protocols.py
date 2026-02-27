@@ -48,6 +48,9 @@ class CacheStore(Protocol):
 
 
 class ConversationStore(Protocol):
+    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        """Return full conversation document for inspection."""
+
     def get_context(self, conversation_id: str, recent_limit: int) -> dict[str, Any]:
         """Return summary + recent messages for conversation."""
 

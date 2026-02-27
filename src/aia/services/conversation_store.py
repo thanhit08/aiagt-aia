@@ -9,6 +9,12 @@ class InMemoryConversationStore:
         self._conversations: dict[str, dict[str, Any]] = {}
         self._request_logs: list[dict[str, Any]] = []
 
+    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        doc = self._conversations.get(conversation_id)
+        if not doc:
+            return None
+        return dict(doc)
+
     def get_context(self, conversation_id: str, recent_limit: int) -> dict[str, Any]:
         doc = self._conversations.get(conversation_id, {"summary": "", "messages": []})
         messages = doc.get("messages", [])
@@ -80,6 +86,14 @@ class MongoConversationStore:
     def __init__(self, mongo_db: Any) -> None:
         self._conversations = mongo_db["conversations"]
         self._request_logs = mongo_db["request_logs"]
+
+    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        doc = self._conversations.find_one({"_id": conversation_id})
+        if not doc:
+            return None
+        # normalize ObjectId-free response shape
+        doc["id"] = str(doc.pop("_id"))
+        return doc
 
     def get_context(self, conversation_id: str, recent_limit: int) -> dict[str, Any]:
         doc = self._conversations.find_one({"_id": conversation_id}) or {}
@@ -167,4 +181,3 @@ def _messages_to_text(messages: list[dict[str, Any]]) -> str:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-

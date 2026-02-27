@@ -73,6 +73,14 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/conversation/{conversation_id}")
+def get_conversation(conversation_id: str) -> dict:
+    doc = conversation_store.get_conversation(conversation_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return doc
+
+
 class IntakeJsonRequest(BaseModel):
     user_id: str = Field(min_length=1)
     instruction: str = Field(min_length=3)
