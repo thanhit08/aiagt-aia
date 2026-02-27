@@ -2,180 +2,104 @@
 
 ## 1. Usage
 - This document is diagrams-only.
-- Canonical engineering behavior is defined in `docs/TDD.md`.
-- Canonical product scope is defined in `docs/PRD.md`.
+- Canonical behavior is defined in `docs/TDD.md`.
 
-## 2. System Context (C4 Level 1)
+## 2. System Context
 ```mermaid
 flowchart LR
-    User[Engineer or QA User]
-    AIA[Accuracy Intelligence Agent]
-    Slack[Slack Workspace]
-    Jira[Jira Cloud]
-    OpenAI[OpenAI API]
-    LangSmith[LangSmith]
-    Langfuse[Langfuse]
-
-    User --> AIA
-    AIA --> Slack
-    AIA --> Jira
-    AIA --> OpenAI
-    AIA --> LangSmith
-    AIA --> Langfuse
+    User[User] --> AIA[AIA Orchestrator]
+    AIA --> OpenAI[OpenAI]
+    AIA --> Qdrant[Qdrant]
+    AIA --> Jira[Jira API]
+    AIA --> Slack[Slack API]
+    AIA --> Obs[LangSmith/Langfuse]
 ```
 
-## 3. Container View (C4 Level 2)
+## 3. Container View
 ```mermaid
 flowchart TB
-    Client[Web or CLI Client]
-
-    subgraph Backend
-      API[FastAPI Service]
-      Graph[LangGraph Engine]
-      RAG[Qdrant Vector DB]
-      Parser[File Parser]
-      SlackAgent[Slack Branch]
-      JiraAgent[Jira Branch]
-    end
-
-    OpenAI[OpenAI GPT-4o]
-    Slack[Slack API]
-    Jira[Jira API]
-    LangSmith[LangSmith]
-    Langfuse[Langfuse]
-
-    Client --> API
-    API --> Graph
-    Graph --> Parser
-    Graph --> RAG
-    Graph --> SlackAgent
-    Graph --> JiraAgent
-    Graph --> OpenAI
-    SlackAgent --> Slack
-    JiraAgent --> Jira
-    Graph --> LangSmith
-    Graph --> Langfuse
+    Client[Client/Postman/curl] --> API[FastAPI]
+    API --> Graph[Workflow Engine]
+    Graph --> Enrich[Intent Enrichment]
+    Graph --> RAG[Optional Retrieval]
+    Graph --> Synth[Answer Synthesis]
+    Graph --> Planner[Action Planner]
+    Planner --> Exec[Action Executor]
+    Exec --> Jira[Jira Connector]
+    Exec --> Slack[Slack Connector]
 ```
 
 ## 4. End-to-End Sequence
 ```mermaid
 sequenceDiagram
-    participant User
-    participant API
-    participant Graph
-    participant RAG
-    participant LLM
-    participant Slack
-    participant Jira
+    participant U as User
+    participant A as API
+    participant G as Graph
+    participant L as LLM
+    participant R as Qdrant
+    participant J as Jira
+    participant S as Slack
 
-    User->>API: Upload QA file
-    API->>Graph: Start workflow
-    Graph->>LLM: Enrichment prompt
-    LLM-->>Graph: Structured task
-    Graph->>RAG: Retrieve accuracy definition
-    RAG-->>Graph: Context package
-    Graph->>LLM: Classify issues
-    LLM-->>Graph: Classification output
+    U->>A: instruction (+ optional file)
+    A->>G: start
+    G->>L: enrichment
+    L-->>G: action_plans + route metadata
 
-    par Parallel branches
-      Graph->>Slack: Post summary
-      Slack-->>Graph: Slack URL
-    and
-      Graph->>Jira: Create tickets
-      Jira-->>Graph: Ticket URLs
+    alt requires_rag
+      G->>R: retrieve context
+      R-->>G: context
     end
 
-    Graph-->>API: Aggregated result
-    API-->>User: JSON response
+    G->>L: synthesize answer
+    L-->>G: answer
+
+    par execute independent actions
+      G->>J: jira action(s)
+      J-->>G: result(s)
+    and
+      G->>S: slack action(s)
+      S-->>G: result(s)
+    end
+
+    G-->>A: answer + action_results + errors
+    A-->>U: final response
 ```
 
-## 5. RAG Pipeline
+## 5. Action Planner and DAG
 ```mermaid
 flowchart TD
-    A[Enriched Task] --> B[Query Generator]
-    B --> C[Embedding Model]
-    C --> D[Qdrant Search]
-    D --> E[Top-K Chunks]
-    E --> F[Rerank]
-    F --> G[Context Packager]
-    G --> H[Classification Prompt]
+    A[Enriched Intent] --> B[Action Registry Validation]
+    B --> C[Build Action DAG]
+    C --> D[Parallel Ready Actions]
+    D --> E[Execute]
+    E --> F[Collect Results]
 ```
 
-## 6. Concurrency Model
+## 6. Failure Isolation
 ```mermaid
 flowchart TD
-    A[Accuracy Issues Ready] --> B1[Slack Branch]
-    A --> B2[Jira Branch]
-
-    B1 --> C1[Generate Summary]
-    C1 --> D1[Post to Slack]
-
-    B2 --> C2[Duplicate Check]
-    C2 --> D2[Create Tickets Async]
+    A[Answer Ready] --> B1[Jira Action]
+    A --> B2[Slack Action]
+    B1 --> C1[Success/Fail]
+    B2 --> C2[Success/Fail]
+    C1 --> D[Aggregate]
+    C2 --> D
+    D --> E[Return Answer + Partial Results]
 ```
 
-```mermaid
-flowchart LR
-    A[Accuracy Issues] --> T1[Ticket 1]
-    A --> T2[Ticket 2]
-    A --> T3[Ticket 3]
-    A --> Tn[Ticket N]
-```
-
-## 7. State Machine
-```mermaid
-stateDiagram-v2
-    [*] --> Enrichment
-    Enrichment --> Retrieval
-    Retrieval --> Classification
-    Classification --> Filter
-    Filter --> Orchestrate
-    Orchestrate --> SlackBranch
-    Orchestrate --> JiraBranch
-    SlackBranch --> Aggregate
-    JiraBranch --> Aggregate
-    Aggregate --> Complete
-    Complete --> [*]
-```
-
-## 8. Observability Topology
-```mermaid
-flowchart LR
-    Graph[LangGraph Runtime] --> Trace[LangSmith Traces]
-    Graph --> Metrics[Langfuse Metrics]
-```
-
-## 9. Failure Isolation
-```mermaid
-flowchart TD
-    Start[Parallel Execution] --> SlackOK[Slack Success]
-    Start --> JiraFail[Jira Ticket Failure]
-    JiraFail --> Retry[Retry]
-    Retry --> FailStill[Still Failing]
-    FailStill --> Continue[Record Error and Continue]
-```
-
-## 10. Deployment Topology
+## 7. Deployment Topology
 ```mermaid
 flowchart TB
     LB[Load Balancer] --> API1[API Instance 1]
     LB --> API2[API Instance 2]
-
-    API1 --> OpenAI[OpenAI]
+    API1 --> OpenAI
     API2 --> OpenAI
-
-    API1 --> Slack[Slack]
-    API2 --> Slack
-
-    API1 --> Jira[Jira]
-    API2 --> Jira
-
-    API1 --> Qdrant[Qdrant]
+    API1 --> Qdrant
     API2 --> Qdrant
-
-    API1 --> LangSmith[LangSmith]
-    API2 --> LangSmith
-
-    API1 --> Langfuse[Langfuse]
-    API2 --> Langfuse
+    API1 --> Jira
+    API2 --> Jira
+    API1 --> Slack
+    API2 --> Slack
+    API1 --> Obs[LangSmith/Langfuse]
+    API2 --> Obs
 ```

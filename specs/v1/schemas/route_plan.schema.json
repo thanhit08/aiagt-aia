@@ -1,15 +1,29 @@
-{
+﻿{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aia.local/schemas/v1/route_plan.schema.json",
   "title": "RoutePlan",
   "type": "object",
   "additionalProperties": false,
-  "required": ["run_slack", "run_jira", "slack_prompt", "jira_prompt"],
+  "required": ["action_plans", "parallel"],
   "properties": {
-    "run_slack": { "type": "boolean" },
-    "run_jira": { "type": "boolean" },
-    "slack_prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
-    "jira_prompt": { "type": "string", "minLength": 1, "maxLength": 4000 },
-    "parallel": { "type": "boolean", "const": true }
+    "parallel": {"type": "boolean"},
+    "action_plans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["system", "action", "params", "risk_level", "depends_on"],
+        "properties": {
+          "system": {"type": "string", "enum": ["jira", "slack"]},
+          "action": {"type": "string", "minLength": 3, "maxLength": 80},
+          "params": {"type": "object"},
+          "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+          "depends_on": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 64}
+          }
+        }
+      }
+    }
   }
 }

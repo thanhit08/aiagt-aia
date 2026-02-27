@@ -1,10 +1,10 @@
-Enriched task:
+﻿Enriched task:
 {{enriched_task_json}}
 
-Accuracy context:
+Context package:
 {{accuracy_context}}
 
-Filtered accuracy issues:
-{{accuracy_issues_json}}
+Generated answer draft:
+{{answer_text}}
 
-Return a single JSON object for `route_plan.schema.json`.
+Return one JSON object for `route_plan.schema.json`.

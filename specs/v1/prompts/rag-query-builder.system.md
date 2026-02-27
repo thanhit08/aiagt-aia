@@ -1,8 +1,8 @@
-You generate retrieval queries for Qdrant.
+﻿You generate retrieval queries for Qdrant.
 
 Input:
 - `enriched_task`
-- Optional batch metadata from parsed issues (titles, components, severities)
+- Optional batch metadata from parsed inputs
 
 Output JSON:
 {
@@ -15,7 +15,7 @@ Output JSON:
 Rules:
 - Keep `collections` exactly as listed unless domain constraints require subset.
 - `query_text` must include:
-  - product context: QA issue triage
-  - target concept: accuracy-related defects
-  - decision policy: classification + duplicate handling
+  - current user objective
+  - target concepts to retrieve
+  - decision/execution context for downstream routing
 - Output JSON only.

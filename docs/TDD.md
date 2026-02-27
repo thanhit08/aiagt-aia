@@ -1,190 +1,179 @@
 ﻿# Technical Design Document (TDD)
 
 ## 1. Document Control
-- System: Accuracy Intelligence Agent (AIA)
+- System: AI Agent Toolkit (AIA)
 - Owner: Engineering
 - Primary Audience: Backend, AI Engineering, QA
 - Status: Draft for implementation
 - Last Updated: 2026-02-27
 
 ### 1.1 Update Policy
-- This document is the source of truth for architecture, execution behavior, data models, and operational constraints.
-- Product scope and acceptance criteria are owned by `docs/PRD.md`.
-- Diagram-only artifacts are maintained in `docs/diagram.md`.
+- This document defines runtime architecture, contracts, and operational controls.
+- Product behavior and acceptance criteria are defined in `docs/PRD.md`.
+- Diagram-only artifacts are in `docs/diagram.md`.
 
 ## 2. Architecture Summary
-AIA is a LangGraph-driven workflow behind a FastAPI endpoint. It performs request enrichment, RAG grounding, issue classification, confidence filtering, then parallel Slack/Jira execution with observability.
+AIA is a query orchestration platform behind FastAPI. It supports general answers plus action execution across Jira and Slack using a connector action registry.
 
 ## 3. Technology Stack
 - API: FastAPI
-- Workflow Engine: LangGraph
+- Workflow: LangGraph (fallback sequential runner)
 - LLM: OpenAI GPT-4o
-- Embeddings: text-embedding-3-small
-- Vector Database: Qdrant
-- Observability: LangSmith
-- Analytics: Langfuse
-- Concurrency: asyncio + graph branch parallelism
+- Vector DB: Qdrant (optional retrieval)
+- Observability: LangSmith + Langfuse
+- Connectors: Jira REST + Slack Web API
 
 ## 4. PRD to TDD Traceability Matrix
 | PRD ID | Requirement Summary | TDD Section |
 | --- | --- | --- |
-| FR-01 | File intake endpoint and formats | 6.1, 8.1 |
-| FR-02 | Request enrichment contract | 6.2 |
-| FR-03 | Accuracy definition retrieval via RAG | 6.3 |
-| FR-04 | Issue classification schema | 6.4, 7.2 |
-| FR-05 | Confidence-based filter | 6.5 |
-| FR-06 | Specialized orchestration prompts | 6.6 |
-| FR-07 | Slack summary and URL | 6.7 |
-| FR-08 | Jira create/skip duplicate behavior | 6.8 |
-| FR-09 | Parallel Slack and Jira execution | 5.2, 6.9 |
-| FR-10 | Trace and metrics emission | 6.10 |
-| NFR-01 | P95 latency target | 9.1 |
-| NFR-02 | Scalability model | 9.2 |
-| NFR-03 | Reliability and isolation | 8.2 |
-| NFR-04 | Security controls | 10 |
+| FR-01 | Unified intake | 6.1 |
+| FR-02 | Enrichment and intent parsing | 6.2 |
+| FR-03 | Action catalog support | 6.4 |
+| FR-04 | Dynamic route planning | 6.5 |
+| FR-05 | Optional RAG | 6.3 |
+| FR-06 | Core answer synthesis | 6.6 |
+| FR-07 | Jira action execution | 6.7 |
+| FR-08 | Slack action execution | 6.8 |
+| FR-09 | Parallel execution | 5.2 |
+| FR-10 | Safety controls | 8.3 |
+| FR-11 | Observability | 6.10 |
+| FR-12 | Graceful degradation | 8.2 |
 
 ## 5. Execution Model
 ### 5.1 Workflow Graph
-`Intake -> Enrichment -> RAG -> Parse -> Classify -> Filter -> Orchestrator -> (Slack || Jira) -> Aggregate -> Respond`
+`Intake -> Enrichment -> OptionalRAG -> AnswerSynthesis -> ActionPlan -> ActionExecution -> Aggregate -> Respond`
 
 ### 5.2 Concurrency Model
-- Graph-level parallelism: Slack and Jira run concurrently.
-- Ticket-level parallelism: Jira ticket operations run with bounded concurrency of 5.
-- Expected end-to-end time approximates `max(slack_branch, jira_branch)`.
+- Build dependency-aware action DAG from action plan.
+- Execute independent actions in parallel.
+- Preserve explicit sequencing for dependent actions.
 
 ## 6. Component Design
 ### 6.1 API Layer
-- Endpoint: `POST /qa-intake`
-- Inputs: multipart file, user_id, instruction
-- Output: response contract with `trace_id`
+- `POST /qa-intake` JSON endpoint.
+- Optional `POST /qa-intake-upload` multipart endpoint.
+- Inputs: `instruction`, `user_id`, optional `issues`, optional file.
 
 ### 6.2 Enrichment Node
-- Purpose: normalize user instruction into a task contract.
-- Retries: 1 retry for invalid JSON response.
-- Output fields: `task_type`, branch flags, `confidence_threshold`.
+- Parse intent and output:
+  - `task_type`
+  - `requires_rag`
+  - `output_tone`
+  - `action_plans[]`
+- Validate against `enriched_task` schema.
 
-### 6.3 RAG Retrieval Node
-- Input: enriched task.
-- Retrieval backend: Qdrant collection(s) for taxonomy, rules, and examples.
-- Retrieval corpus: bug taxonomy, classification rules, historical examples.
-- Strategy: semantic top-k retrieval plus rerank.
-- Failure: if no usable context, stop classification path.
+### 6.3 Optional Retrieval Node
+- Trigger when query requires external knowledge/context.
+- Build query spec and retrieve from Qdrant.
 
-### 6.4 Classification Node
-- Input: parsed issue + retrieved context.
-- Output schema:
+### 6.4 Action Registry
+- Central catalog maps action ID -> executor + schema.
+- Example shape:
 ```json
 {
-  "issue_id": "string",
-  "accuracy_related": true,
-  "confidence": 0.82,
-  "reason": "Incorrect numeric calculation"
+  "jira_search_issues": {"system": "jira", "risk": "low", "executor": "jira.search"},
+  "jira_create_issue": {"system": "jira", "risk": "medium", "executor": "jira.create"},
+  "slack_post_message": {"system": "slack", "risk": "low", "executor": "slack.post"},
+  "slack_archive_channel": {"system": "slack", "risk": "high", "executor": "slack.archive"}
 }
 ```
-- Processing: batch classification in chunks of 5-10 issues.
 
-### 6.5 Filter Node
-- Rule: keep issue when `accuracy_related` is true and confidence meets threshold.
+### 6.5 Route Planning Node
+- Converts enriched intent into executable `action_plans`.
+- Resolves defaults (assignee = current user, project from context, channel from query/profile).
+- Rejects unsupported actions early with clear error.
 
-### 6.6 Orchestrator Node
-- Generates branch-specific instructions.
-- Must not pass raw user instruction to tools unchanged.
+### 6.6 Answer Synthesis Node
+- Produces user-facing answer regardless of actions.
+- Includes summary of planned/executed actions.
 
-### 6.7 Slack Branch
-- Generate executive summary markdown.
-- Post message via Slack API.
-- Return `slack_url`.
-- Retry policy: max 2 attempts.
+### 6.7 Jira Executor
+- Supports all configured Jira actions.
+- Per-action input schema validation.
+- Returns structured data and links.
 
-### 6.8 Jira Branch
-- Per issue: duplicate check then create-or-skip.
-- Return created and duplicate references.
-- Retry policy: max 2 attempts per ticket call.
+### 6.8 Slack Executor
+- Supports all configured Slack actions.
+- Per-action input schema validation.
+- Returns structured data and message/channel links.
 
 ### 6.9 Aggregation Node
-- Merge Slack/Jira outputs.
-- Preserve partial failure details in error list.
+- Combines answer + action outcomes.
+- Preserves both success and error entries.
 
-### 6.10 Observability Node
-- LangSmith: node timing, prompts, tool calls, retries, routing.
-- Langfuse: token usage, cost, latency distribution, duplicate rate.
+### 6.10 Observability
+- Log: intent parse, action plan, action params hash, action result status, latency.
+- Trace each action step with correlation ID.
 
 ## 7. Data Models
-### 7.1 Global State
+### 7.1 Enriched Task (Logical)
+```json
+{
+  "task_type": "tool_orchestration",
+  "requires_rag": false,
+  "output_tone": "technical",
+  "action_plans": [
+    {
+      "system": "jira",
+      "action": "jira_search_issues",
+      "params": {"jql": "project = APP AND assignee = currentUser()"},
+      "risk_level": "low",
+      "depends_on": []
+    }
+  ]
+}
+```
+
+### 7.2 Final Response (Logical)
 ```json
 {
   "request_id": "string",
-  "parsed_issues": [],
-  "enriched_task": {},
-  "accuracy_definition": {},
-  "classified_issues": [],
-  "accuracy_issues": [],
-  "slack_result": {},
-  "jira_result": {},
-  "errors": [],
-  "metrics": {},
-  "trace_id": "string"
+  "answer": "string",
+  "trace_id": "string",
+  "action_results": [
+    {"system": "jira", "action": "jira_search_issues", "status": "success", "data": {}},
+    {"system": "slack", "action": "slack_post_message", "status": "failed", "error": "channel_not_found"}
+  ],
+  "errors": []
 }
 ```
 
-### 7.2 Validation Rules
-- `confidence` must be between 0 and 1.
-- `reason` must be non-empty if `accuracy_related` is true.
-- Every issue must have stable `issue_id`.
-
-## 8. Failure Handling
+## 8. Reliability and Safety
 ### 8.1 Retry Policy
-- LLM structured output: 1 retry.
-- Slack API: 2 retries.
-- Jira API: 2 retries per ticket.
+- Low-risk read/search actions: retry up to 2 times.
+- Write/update actions: retry with idempotency protection.
 
 ### 8.2 Isolation Policy
-- Slack branch failure must not block Jira branch completion.
-- Jira per-ticket failure must not block other ticket attempts.
-- Hard stop only for unrecoverable upstream failures (e.g., parsing or classification unavailable).
+- Failure in one action does not invalidate independent actions.
+- Core answer is always returned if synthesis succeeds.
+
+### 8.3 Risk Controls
+- Risk levels: `low`, `medium`, `high`.
+- High-risk actions (delete/archive/bulk-update) require safety policy checks.
+- Optional user confirmation gate for high-risk actions.
 
 ## 9. Performance and Scaling
-### 9.1 Latency Budget
-| Stage | Target |
-| --- | --- |
-| Enrichment | < 600 ms |
-| RAG | < 300 ms |
-| Classification (10 issues) | < 1.5 s |
-| Slack branch | < 800 ms |
-| Jira branch | < 2.0 s |
-| End-to-end P95 | < 4.0 s |
+### 9.1 Targets
+- P95 < 4s for non-file, single-action requests.
+- P95 < 7s for multi-action requests.
 
-### 9.2 Scalability Strategy
-- Stateless API containers behind load balancer.
-- Shared Qdrant cluster and secrets backend.
-- User-level rate limiting and upload limits.
+### 9.2 Scaling
+- Stateless API workers.
+- Shared Qdrant and connector pools.
+- Per-user and per-system rate limiting.
 
 ## 10. Security
-- Secret storage for OpenAI, Slack, Jira tokens.
-- Prompt and log scrubbing for sensitive fields.
-- Upload file limits and mime/type validation.
+- Per-system OAuth/token scope validation.
+- Action-level authorization checks.
+- Sensitive data redaction in logs.
+- Audit records for all external actions.
 
 ## 11. Testing Strategy
-- Unit: parsing, filtering, schema validation, duplicate checks.
-- Integration: end-to-end with Slack/Jira mocks.
-- Load: concurrent uploads and large issue sets.
+- Unit: intent parsing, action schema validation, risk policy checks.
+- Integration: Jira/Slack read and write action suites.
+- E2E: multi-action queries with mixed success/failure.
+- Regression: action catalog compatibility tests.
 
-## 12. Open Decisions
-- Queue-based background execution rollout timing.
-- Human approval threshold policy for low-confidence outputs.
-
-## 13. v1 Implementation Assets
-- Schemas and prompt templates are versioned in `specs/v1/`.
-- Primary contracts:
-  - `specs/v1/schemas/enriched_task.schema.json`
-  - `specs/v1/schemas/classification_output.schema.json`
-  - `specs/v1/schemas/route_plan.schema.json`
-  - `specs/v1/schemas/final_response.schema.json`
-- Prompt templates:
-  - `specs/v1/prompts/enrichment.system.md`
-  - `specs/v1/prompts/rag-query-builder.system.md`
-  - `specs/v1/prompts/classification.system.md`
-  - `specs/v1/prompts/orchestrator-routing.system.md`
-  - `specs/v1/prompts/slack-summary.system.md`
-  - `specs/v1/prompts/jira-ticket.system.md`
-  - `specs/v1/prompts/duplicate-check.system.md`
+## 12. v1 Implementation Assets
+- Schemas and prompt templates in `specs/v1/`.
+- Existing code should migrate from boolean route flags to `action_plans[]` execution model.

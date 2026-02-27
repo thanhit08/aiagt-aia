@@ -1,4 +1,4 @@
-Instruction:
+﻿Instruction:
 {{instruction}}
 
-Return a single JSON object for `enriched_task.schema.json`.
+Return one JSON object for `enriched_task.schema.json`.

@@ -1,26 +1,26 @@
-# AIA v1 Schemas and Prompt Templates
+﻿# AIA v1 Schemas and Prompt Templates
 
-This folder contains implementation-ready contracts for AIA v1.
+This folder contains implementation-ready contracts for general query orchestration with Jira/Slack action catalogs.
 
-## Structure
-- `schemas/`: JSON Schema contracts for request processing and outputs.
-- `prompts/`: Prompt templates for enrichment, RAG retrieval, routing, classification, and branch execution.
+## Supported Interaction Pattern
+- User asks any question
+- Optional file/context provided
+- Enrichment generates `action_plans[]`
+- Optional RAG retrieval
+- Route planner validates actions
+- Executors run Jira/Slack actions
+- Aggregator returns answer + action results
 
-## Suggested Runtime Order
-1. Validate intake request.
-2. Run enrichment prompt and validate `enriched_task`.
-3. Build RAG query from `enriched_task`.
-4. Retrieve context from Qdrant and package context.
-5. Classify issues using context and validate each classification object.
-6. Filter by confidence threshold.
-7. Route with orchestrator prompt.
-8. Execute Slack and Jira branches in parallel.
-9. Validate final API response before returning.
-
-## Files to Start With
+## Key Contracts
 - `schemas/enriched_task.schema.json`
-- `schemas/classification_output.schema.json`
+- `schemas/route_plan.schema.json`
 - `schemas/final_response.schema.json`
+
+## Key Prompts
 - `prompts/enrichment.system.md`
-- `prompts/rag-query-builder.system.md`
 - `prompts/orchestrator-routing.system.md`
+- `prompts/jira-ticket.system.md`
+- `prompts/slack-summary.system.md`
+
+## Compatibility Note
+Legacy placeholder variable names may remain in some prompt templates to keep current code paths stable until executor refactor is complete.

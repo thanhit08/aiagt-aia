@@ -1,7 +1,7 @@
-Tone:
+﻿Tone:
 {{output_tone}}
 
-Accuracy issues:
+Actionable items:
 {{accuracy_issues_json}}
 
 Context hints:

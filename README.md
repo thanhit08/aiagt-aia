@@ -1,4 +1,4 @@
-# AIA (Accuracy Intelligence Agent)
+# AIA (AI Agent Toolkit)
 
 ## Local Run
 ```bash
@@ -11,19 +11,19 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-QA intake with CSV:
+General query intake (no file required):
 ```bash
 curl -X POST http://localhost:8000/qa-intake \
   -H "Content-Type: application/json" \
   -d '{
     "user_id":"test-user",
-    "instruction":"Find accuracy issues and route to Slack and Jira",
+    "instruction":"Summarize deployment blockers and post summary to Slack",
     "issues":[
       {
         "issue_id":"1",
-        "title":"Wrong total amount",
-        "description":"Output differs from expected value",
-        "steps":"Run checkout flow",
+        "title":"Build failed in staging",
+        "description":"Image pull timeout in service api",
+        "steps":"Trigger release pipeline",
         "severity":"critical"
       }
     ]
