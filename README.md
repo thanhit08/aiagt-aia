@@ -1,47 +1,47 @@
 # AIA (AI Agent Toolkit)
 
-## Local Run
+## Local setup
+1. Create env file:
+```bash
+cp .env.example .env
+```
+2. For real services, set:
+- `AIA_USE_REAL_SERVICES=true`
+- OpenAI/Jira/Slack credentials in `.env`
+3. Install and run:
 ```bash
 pip install -e .
 uvicorn aia.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Health check:
+## Qdrant local docker (no API key)
 ```bash
-curl http://localhost:8000/health
+docker run -p 6333:6333 qdrant/qdrant
 ```
 
-General query intake (no file required):
+## Endpoints
+- `GET /health`
+- `POST /qa-intake` (JSON)
+- `POST /qa-intake-upload` (multipart; requires `python-multipart`)
+
+## curl test (JSON)
 ```bash
 curl -X POST http://localhost:8000/qa-intake \
   -H "Content-Type: application/json" \
   -d '{
     "user_id":"test-user",
-    "instruction":"Summarize deployment blockers and post summary to Slack",
-    "issues":[
-      {
-        "issue_id":"1",
-        "title":"Build failed in staging",
-        "description":"Image pull timeout in service api",
-        "steps":"Trigger release pipeline",
-        "severity":"critical"
-      }
-    ]
+    "instruction":"Find issues assigned to me in Jira and post summary to Slack",
+    "issues":[]
   }'
 ```
 
-Optional file upload endpoint (when `python-multipart` is installed):
-```bash
-curl -X POST http://localhost:8000/qa-intake-upload \
-  -F "user_id=test-user" \
-  -F "instruction=Find accuracy issues and route to Slack and Jira" \
-  -F "file=@issues.csv;type=text/csv"
-```
+## Real credentials required
+- OpenAI: `OPENAI_API_KEY`
+- Jira: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`
+- Slack: `SLACK_BOT_TOKEN`
 
 ## CI/CD
-- CI: `.github/workflows/ci.yml` runs compile + tests on PR/push.
-- CD: `.github/workflows/cd.yml` builds/pushes Docker image to GHCR on `main`.
-- Optional deploy: set `RENDER_DEPLOY_HOOK_URL` secret to auto-deploy and get a live endpoint.
+- CI: `.github/workflows/ci.yml`
+- CD: `.github/workflows/cd.yml`
+- Optional Render auto-deploy via `RENDER_DEPLOY_HOOK_URL`
 
-## Required Secrets (for live deploy)
-- `RENDER_DEPLOY_HOOK_URL` (optional): Render service deploy hook URL.

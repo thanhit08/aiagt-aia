@@ -30,4 +30,5 @@ def test_qa_intake_csv() -> None:
     body = resp.json()
     assert "request_id" in body
     assert "trace_id" in body
-    assert "jira_urls" in body
+    assert "answer" in body
+    assert "action_results" in body

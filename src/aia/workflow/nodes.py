@@ -2,12 +2,7 @@ import json
 from dataclasses import dataclass
 from uuid import uuid4
 
-from aia.models.contracts import (
-    ClassificationOutput,
-    EnrichedTask,
-    FinalResponse,
-    RoutePlan,
-)
+from aia.models.contracts import ActionResult, EnrichedTask, FinalResponse, RoutePlan
 from aia.services.protocols import JiraClient, LLMClient, SlackClient, VectorStore
 from aia.workflow.prompts import load_prompt, render_template
 from aia.workflow.state import WorkflowState
@@ -22,24 +17,21 @@ class NodeDeps:
 
 
 def intake_node(state: WorkflowState) -> WorkflowState:
-    return {
-        "trace_id": state.get("trace_id", str(uuid4())),
-        "errors": state.get("errors", []),
-    }
+    return {"trace_id": state.get("trace_id", str(uuid4())), "errors": state.get("errors", [])}
 
 
 def enrichment_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
     sys_prompt = load_prompt("enrichment.system.md")
-    user_prompt = render_template(
-        load_prompt("enrichment.user.md"),
-        instruction=state["instruction"],
-    )
+    user_prompt = render_template(load_prompt("enrichment.user.md"), instruction=state["instruction"])
     raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
     enriched = EnrichedTask.model_validate(raw).model_dump()
     return {"enriched_task": enriched}
 
 
 def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    if not state["enriched_task"].get("requires_rag", False):
+        return {"rag_context": {"enabled": False, "hits": []}}
+
     sys_prompt = load_prompt("rag-query-builder.system.md")
     user_prompt = json.dumps(
         {
@@ -48,41 +40,35 @@ def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
         }
     )
     query_spec = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
+    if not isinstance(query_spec, dict):
+        query_spec = {}
     hits = deps.vector_store.search(
         collections=query_spec.get("collections", ["taxonomy", "rules", "examples"]),
-        query_text=query_spec["query_text"],
+        query_text=query_spec.get("query_text", state["instruction"]),
         top_k=int(query_spec.get("top_k", 5)),
         min_score=float(query_spec.get("min_score", 0.72)),
     )
-    rag_context = {"query_spec": query_spec, "hits": hits}
-    return {"rag_context": rag_context}
+    return {"rag_context": {"enabled": True, "query_spec": query_spec, "hits": hits}}
 
 
-def classify_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    sys_prompt = load_prompt("classification.system.md")
-    user_prompt = render_template(
-        load_prompt("classification.user.md"),
-        accuracy_context=json.dumps(state["rag_context"], ensure_ascii=False),
-        confidence_threshold=str(state["enriched_task"]["confidence_threshold"]),
-        issues_json=json.dumps(state.get("parsed_issues", []), ensure_ascii=False),
+def answer_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    sys_prompt = (
+        "You are AIA. Provide a concise, useful answer to the user's request. "
+        "If actions are requested, summarize what will be done."
     )
-    raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
-    if isinstance(raw, dict) and "items" in raw:
-        raw_items = raw["items"]
-    else:
-        raw_items = raw
-    classified = [ClassificationOutput.model_validate(i).model_dump() for i in raw_items]
-    return {"classified_issues": classified}
-
-
-def filter_node(state: WorkflowState) -> WorkflowState:
-    threshold = state["enriched_task"]["confidence_threshold"]
-    accuracy_issues = [
-        issue
-        for issue in state.get("classified_issues", [])
-        if issue["accuracy_related"] and issue["confidence"] >= threshold
-    ]
-    return {"accuracy_issues": accuracy_issues}
+    user_prompt = json.dumps(
+        {
+            "instruction": state["instruction"],
+            "parsed_issues": state.get("parsed_issues", []),
+            "rag_context": state.get("rag_context", {}),
+            "enriched_task": state["enriched_task"],
+        },
+        ensure_ascii=False,
+    )
+    answer = deps.llm.complete_text(system_prompt=sys_prompt, user_prompt=user_prompt).strip()
+    if not answer:
+        answer = "Request processed."
+    return {"answer": answer}
 
 
 def route_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
@@ -90,71 +76,61 @@ def route_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
     user_prompt = render_template(
         load_prompt("orchestrator-routing.user.md"),
         enriched_task_json=json.dumps(state["enriched_task"], ensure_ascii=False),
-        accuracy_context=json.dumps(state["rag_context"], ensure_ascii=False),
-        accuracy_issues_json=json.dumps(state.get("accuracy_issues", []), ensure_ascii=False),
+        accuracy_context=json.dumps(state.get("rag_context", {}), ensure_ascii=False),
+        answer_text=state.get("answer", ""),
     )
     raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
-    route_plan = RoutePlan.model_validate(raw).model_dump()
+    if isinstance(raw, dict) and raw.get("action_plans") is not None:
+        route_raw = raw
+    else:
+        route_raw = {"parallel": True, "action_plans": state["enriched_task"].get("action_plans", [])}
+    route_plan = RoutePlan.model_validate(route_raw).model_dump()
     return {"route_plan": route_plan}
 
 
-def slack_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    if not state["route_plan"]["run_slack"]:
-        return {"slack_result": {"summary_posted": False, "slack_url": ""}}
+def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    results: list[dict] = []
+    errors = list(state.get("errors", []))
+    action_plans = state.get("route_plan", {}).get("action_plans", [])
 
-    sys_prompt = load_prompt("slack-summary.system.md")
-    user_prompt = render_template(
-        load_prompt("slack-summary.user.md"),
-        output_tone=state["enriched_task"]["output_tone"],
-        accuracy_issues_json=json.dumps(state.get("accuracy_issues", []), ensure_ascii=False),
-        accuracy_context=json.dumps(state["rag_context"], ensure_ascii=False),
-    )
-    markdown = deps.llm.complete_text(system_prompt=sys_prompt, user_prompt=user_prompt)
-    slack_url = deps.slack.post_markdown(markdown=markdown)
-    return {
-        "slack_result": {
-            "summary_posted": True,
-            "slack_url": slack_url,
-            "summary_markdown": markdown,
-        }
-    }
+    for item in action_plans:
+        system = item.get("system")
+        action = item.get("action")
+        params = item.get("params", {})
+        try:
+            if system == "jira":
+                result = deps.jira.execute_action(action=action, params=params)
+            elif system == "slack":
+                result = deps.slack.execute_action(action=action, params=params)
+            else:
+                result = {
+                    "system": system or "unknown",
+                    "action": action or "unknown",
+                    "status": "failed",
+                    "error": f"Unsupported system: {system}",
+                }
+            action_result = ActionResult.model_validate(result).model_dump()
+        except Exception as exc:
+            action_result = ActionResult(
+                system=system or "jira",
+                action=action or "unknown_action",
+                status="failed",
+                error=str(exc),
+            ).model_dump()
+            errors.append(f"{action_result['system']}:{action_result['action']} failed: {exc}")
 
+        results.append(action_result)
 
-def jira_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    if not state["route_plan"]["run_jira"]:
-        return {"jira_result": {"tickets_created": 0, "duplicates_skipped": 0, "jira_urls": []}}
-
-    sys_prompt = load_prompt("jira-ticket.system.md")
-    user_prompt = render_template(
-        load_prompt("jira-ticket.user.md"),
-        accuracy_issues_json=json.dumps(state.get("accuracy_issues", []), ensure_ascii=False),
-        routing_hints=json.dumps(state["enriched_task"].get("routing_hints", []), ensure_ascii=False),
-    )
-    tickets_payload = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
-    tickets = tickets_payload.get("tickets", [])
-
-    created_urls: list[str] = []
-    for payload in tickets:
-        created_urls.append(deps.jira.create_ticket(payload))
-
-    return {
-        "jira_result": {
-            "tickets_created": len(created_urls),
-            "duplicates_skipped": 0,
-            "jira_urls": created_urls,
-        }
-    }
+    return {"action_results": results, "errors": errors}
 
 
 def aggregate_node(state: WorkflowState) -> WorkflowState:
     final = FinalResponse(
         request_id=state["request_id"],
-        summary_posted=state.get("slack_result", {}).get("summary_posted", False),
-        tickets_created=state.get("jira_result", {}).get("tickets_created", 0),
-        duplicates_skipped=state.get("jira_result", {}).get("duplicates_skipped", 0),
-        slack_url=state.get("slack_result", {}).get("slack_url", ""),
-        jira_urls=state.get("jira_result", {}).get("jira_urls", []),
+        answer=state.get("answer", "Request processed."),
         trace_id=state["trace_id"],
+        action_results=state.get("action_results", []),
         errors=state.get("errors", []),
     ).model_dump()
     return {"final_response": final}
+

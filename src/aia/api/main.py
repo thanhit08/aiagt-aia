@@ -4,22 +4,25 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - optional dependency in constrained env
+    def load_dotenv() -> bool:
+        return False
 
+from aia.services.factory import build_clients
 from aia.workflow.graph import build_graph
-from aia.services.stub_clients import (
-    StubJiraClient,
-    StubLLMClient,
-    StubSlackClient,
-    StubVectorStore,
-)
+
+load_dotenv()
 
 app = FastAPI(title="AIA API", version="0.1.0")
 
+llm, vector_store, slack, jira = build_clients()
 graph = build_graph(
-    llm=StubLLMClient(),
-    vector_store=StubVectorStore(),
-    slack=StubSlackClient(),
-    jira=StubJiraClient(),
+    llm=llm,
+    vector_store=vector_store,
+    slack=slack,
+    jira=jira,
 )
 
 

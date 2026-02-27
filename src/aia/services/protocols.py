@@ -2,8 +2,8 @@ from typing import Any, Protocol
 
 
 class LLMClient(Protocol):
-    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        """Return a JSON object from the model."""
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any] | list[Any]:
+        """Return JSON-like output from the model."""
 
     def complete_text(self, *, system_prompt: str, user_prompt: str) -> str:
         """Return plain text output from the model."""
@@ -18,15 +18,15 @@ class VectorStore(Protocol):
         top_k: int,
         min_score: float,
     ) -> list[dict[str, Any]]:
-        """Return ranked hits with payloads from Qdrant."""
+        """Return ranked hits from Qdrant."""
 
 
 class SlackClient(Protocol):
-    def post_markdown(self, *, markdown: str) -> str:
-        """Post markdown and return message URL."""
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Execute one Slack action and return structured output."""
 
 
 class JiraClient(Protocol):
-    def create_ticket(self, payload: dict[str, Any]) -> str:
-        """Create ticket and return ticket URL."""
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Execute one Jira action and return structured output."""
 

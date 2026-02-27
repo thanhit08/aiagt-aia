@@ -2,53 +2,76 @@ from typing import Any
 
 
 class StubLLMClient:
-    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        if "enriched_task.schema.json" in user_prompt:
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any] | list[Any]:
+        text = f"{system_prompt}\n{user_prompt}".lower()
+        action_plans = []
+        if "jira" in text:
+            action_plans.append(
+                {
+                    "system": "jira",
+                    "action": "jira_search_issues",
+                    "params": {"jql": "assignee = currentUser()"},
+                    "risk_level": "low",
+                    "depends_on": [],
+                }
+            )
+        if "slack" in text:
+            action_plans.append(
+                {
+                    "system": "slack",
+                    "action": "slack_post_message",
+                    "params": {"channel": "#general", "text": "Stub result"},
+                    "risk_level": "low",
+                    "depends_on": [],
+                }
+            )
+
+        if "enriched_task.schema.json" in text:
             return {
-                "task_type": "accuracy_filter",
-                "requires_slack": True,
-                "requires_jira": True,
-                "confidence_threshold": 0.6,
-                "output_tone": "executive",
-                "routing_hints": ["high_severity_first", "dedupe_before_create"],
-                "rag_query_seed": "Definition and classification rules for accuracy-related defects.",
+                "task_type": "tool_orchestration" if action_plans else "general_query",
+                "requires_rag": False,
+                "output_tone": "neutral",
+                "rag_query_seed": "",
+                "action_plans": action_plans,
             }
-        if "route_plan.schema.json" in user_prompt:
+        if "route_plan.schema.json" in text:
+            return {"parallel": True, "action_plans": action_plans}
+        if "query_text" in text:
             return {
-                "run_slack": True,
-                "run_jira": True,
-                "slack_prompt": "Generate executive summary for Slack.",
-                "jira_prompt": "Create Jira ticket payloads.",
-                "parallel": True,
+                "collections": ["taxonomy", "rules", "examples"],
+                "query_text": "general retrieval context",
+                "top_k": 5,
+                "min_score": 0.72,
             }
-        if "tickets" in system_prompt.lower():
-            return {"tickets": []}
-        if "classify whether each qa issue" in system_prompt.lower():
-            return []
-        return {
-            "collections": ["taxonomy", "rules", "examples"],
-            "query_text": "accuracy-related qa issue rules and examples",
-            "top_k": 5,
-            "min_score": 0.72,
-        }
+        return {}
 
     def complete_text(self, *, system_prompt: str, user_prompt: str) -> str:
-        return "AIA Summary: no high-confidence accuracy issues found."
+        return "Stub answer: request processed successfully."
 
 
 class StubVectorStore:
     def search(
         self, *, collections: list[str], query_text: str, top_k: int, min_score: float
     ) -> list[dict[str, Any]]:
-        return [{"text": "Accuracy context", "score": 0.9, "source": "stub"}]
+        return [{"text": "Stub context", "score": 0.9, "collection": collections[0] if collections else ""}]
 
 
 class StubSlackClient:
-    def post_markdown(self, *, markdown: str) -> str:
-        return "https://slack.example.local/message/1"
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "system": "slack",
+            "action": action,
+            "status": "success",
+            "data": {"url": "https://slack.example.local/message/1", "params": params},
+        }
 
 
 class StubJiraClient:
-    def create_ticket(self, payload: dict[str, Any]) -> str:
-        return "https://jira.example.local/browse/AIA-1"
+    def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "system": "jira",
+            "action": action,
+            "status": "success",
+            "data": {"url": "https://jira.example.local/browse/AIA-1", "params": params},
+        }
 
