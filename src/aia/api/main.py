@@ -71,6 +71,7 @@ class IntakeJsonRequest(BaseModel):
     conversation_id: str | None = None
     file_id: str | None = None
     telegram_chat_id: str | None = None
+    accept_parallel: bool | None = None
 
 
 @app.post("/qa-intake")
@@ -122,6 +123,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         "user_id": payload.user_id,
         "file_id": payload.file_id,
         "telegram_chat_id": payload.telegram_chat_id,
+        "accept_parallel": payload.accept_parallel,
     }
 
     conversation_store.append_message(
@@ -528,6 +530,7 @@ def _step_snapshot(data: dict) -> dict:
         "final_response",
         "trace_id",
         "file_id",
+        "accept_parallel",
     }
     out: dict = {}
     for key in allow_keys:

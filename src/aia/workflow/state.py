@@ -5,6 +5,7 @@ class WorkflowState(TypedDict, total=False):
     request_id: str
     user_id: str
     telegram_chat_id: str
+    accept_parallel: bool
     instruction: str
     raw_instruction: str
     file_id: str

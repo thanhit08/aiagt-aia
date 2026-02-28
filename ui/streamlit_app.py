@@ -1,6 +1,7 @@
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 import httpx
 import streamlit as st
@@ -92,12 +93,15 @@ def _render_step_detail_buttons(status: dict | None) -> None:
     for idx, item in enumerate(details, start=1):
         node = item.get("node", f"step_{idx}")
         state = item.get("state", "unknown")
-        c1, c2, c3 = st.columns([5, 2, 2])
+        duration = _step_duration_seconds(item)
+        c1, c2, c3, c4 = st.columns([4, 2, 2, 2])
         with c1:
             st.write(f"{idx}. `{node}`")
         with c2:
             st.write(state)
         with c3:
+            st.write(f"{duration:.2f}s")
+        with c4:
             if st.button("Detail", key=f"detail_btn_{idx}_{node}"):
                 st.session_state.selected_step_detail = item
 
@@ -105,6 +109,37 @@ def _render_step_detail_buttons(status: dict | None) -> None:
     if isinstance(selected, dict):
         st.markdown("**Step Detail**")
         st.json(selected)
+
+
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not isinstance(ts, str) or not ts.strip():
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _step_duration_seconds(item: dict) -> float:
+    started = _parse_iso(item.get("started_at"))
+    finished = _parse_iso(item.get("finished_at"))
+    if started is None:
+        return 0.0
+    end = finished or datetime.now(timezone.utc)
+    return max(0.0, (end - started).total_seconds())
+
+
+def _workflow_total_seconds(status: dict | None) -> float:
+    details = (status or {}).get("step_details", [])
+    if not isinstance(details, list) or not details:
+        return 0.0
+    starts = [_parse_iso(item.get("started_at")) for item in details if isinstance(item, dict)]
+    ends = [(_parse_iso(item.get("finished_at")) or datetime.now(timezone.utc)) for item in details if isinstance(item, dict)]
+    starts = [x for x in starts if x is not None]
+    ends = [x for x in ends if x is not None]
+    if not starts or not ends:
+        return 0.0
+    return max(0.0, (max(ends) - min(starts)).total_seconds())
 
 
 st.set_page_config(page_title="AIA Tester", page_icon="AIA", layout="wide")
@@ -120,6 +155,8 @@ if "latest_status_payload" not in st.session_state:
     st.session_state.latest_status_payload = {}
 if "selected_step_detail" not in st.session_state:
     st.session_state.selected_step_detail = None
+if "accept_parallel" not in st.session_state:
+    st.session_state.accept_parallel = False
 
 with st.sidebar:
     st.header("Settings")
@@ -127,6 +164,10 @@ with st.sidebar:
     user_id = st.text_input("User ID", value="streamlit-user")
     st.session_state.conversation_id = st.text_input("Conversation ID", value=st.session_state.conversation_id)
     st.session_state.last_file_id = st.text_input("File ID", value=st.session_state.last_file_id)
+    st.session_state.accept_parallel = st.checkbox(
+        "ACCEPT_PARALLEL (request override)",
+        value=st.session_state.accept_parallel,
+    )
 
 col_a, col_b = st.columns([1, 1])
 
@@ -190,6 +231,7 @@ with col_b:
     _draw_workflow_map()
     progress_placeholder = st.empty()
     detail_placeholder = st.empty()
+    timing_placeholder = st.empty()
     per_step_placeholder = st.container()
 
     st.subheader("3) Send Message")
@@ -208,15 +250,18 @@ with col_b:
                 "user_id": user_id,
                 "conversation_id": st.session_state.conversation_id,
                 "instruction": instruction,
+                "accept_parallel": bool(st.session_state.accept_parallel),
             }
             if st.session_state.last_file_id:
                 payload["file_id"] = st.session_state.last_file_id
 
+            ui_started_at = time.perf_counter()
             progress_placeholder.markdown(
                 _render_progress_html({"state": "running", "current_node": "intake", "step_index": 1}),
                 unsafe_allow_html=True,
             )
             detail_placeholder.info(f"Request ID: {request_id}")
+            timing_placeholder.info("Total runtime: 0.00s")
 
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(_post_qa, base_url, payload)
@@ -236,6 +281,9 @@ with col_b:
                                     f"Current: {status_payload.get('current_node')} | "
                                     f"Step: {status_payload.get('step_index')}/{status_payload.get('total_steps')}"
                                 )
+                                total_secs = _workflow_total_seconds(status_payload)
+                                live_secs = max(total_secs, time.perf_counter() - ui_started_at)
+                                timing_placeholder.info(f"Total runtime: {live_secs:.2f}s")
                         except Exception:
                             pass
                         time.sleep(0.4)
@@ -251,11 +299,16 @@ with col_b:
                     unsafe_allow_html=True,
                 )
                 detail_placeholder.success("Workflow completed.")
+                total_secs = _workflow_total_seconds(st.session_state.latest_status_payload)
+                ui_total = time.perf_counter() - ui_started_at
+                timing_placeholder.success(f"Total runtime: {max(total_secs, ui_total):.2f}s")
                 try:
                     with httpx.Client(timeout=10.0) as client:
                         done_status = client.get(f"{base_url}/qa-intake/{request_id}/status")
                         if done_status.status_code == 200:
                             st.session_state.latest_status_payload = done_status.json()
+                            final_total = _workflow_total_seconds(st.session_state.latest_status_payload)
+                            timing_placeholder.success(f"Total runtime: {final_total:.2f}s")
                 except Exception:
                     pass
                 st.json(data)
@@ -265,6 +318,9 @@ with col_b:
                     unsafe_allow_html=True,
                 )
                 detail_placeholder.error("Workflow failed.")
+                total_secs = _workflow_total_seconds(st.session_state.latest_status_payload)
+                ui_total = time.perf_counter() - ui_started_at
+                timing_placeholder.error(f"Total runtime: {max(total_secs, ui_total):.2f}s")
                 st.code(resp.text)
         except Exception as exc:
             progress_placeholder.markdown(
@@ -272,6 +328,7 @@ with col_b:
                 unsafe_allow_html=True,
             )
             detail_placeholder.error(f"Request error: {exc}")
+            timing_placeholder.error("Total runtime: failed")
 
     st.markdown("**Workflow Step Details**")
     with per_step_placeholder:

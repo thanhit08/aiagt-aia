@@ -12,6 +12,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 @dataclass
 class Settings:
     use_real_services: bool = _env_bool("AIA_USE_REAL_SERVICES", False)
+    accept_parallel: bool = _env_bool("ACCEPT_PARALLEL", False)
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -120,103 +121,235 @@ def route_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
 
 
 def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    action_plans_raw = state.get("route_plan", {}).get("action_plans", [])
+    action_plans = [a for a in action_plans_raw if isinstance(a, dict)]
+    if _should_run_actions_in_parallel(state):
+        return _execute_actions_parallel(state, deps, action_plans)
+    return _execute_actions_sequential(state, deps, action_plans)
+
+
+def _execute_actions_sequential(state: WorkflowState, deps: NodeDeps, action_plans: list[dict]) -> WorkflowState:
     results: list[dict] = []
     errors = list(state.get("errors", []))
-    action_plans = state.get("route_plan", {}).get("action_plans", [])
     action_status: dict[str, str] = {}
     action_data: dict[str, dict] = {}
 
-    for item in action_plans:
-        system = item.get("system")
-        action = item.get("action")
-        params = item.get("params", {}) if isinstance(item.get("params"), dict) else {}
-        depends_on = item.get("depends_on", []) if isinstance(item.get("depends_on"), list) else []
+    for idx, item in enumerate(action_plans):
+        outcome = _run_action_item(
+            deps=deps,
+            state=state,
+            item=item,
+            index=idx,
+            action_status=action_status,
+            action_data=action_data,
+        )
+        result = outcome["result"]
+        results.append(result)
+        key = str(outcome["key"])
+        status = str(result.get("status", "failed"))
+        action_status[key] = status
+        if status == "success":
+            data_payload = result.get("data")
+            if isinstance(data_payload, dict):
+                action_data[key] = data_payload
+        if status == "failed" and result.get("error"):
+            errors.append(f"{result['system']}:{result['action']} failed: {result['error']}")
+    return {"action_results": results, "errors": errors}
 
-        blocked_dep = next((dep for dep in depends_on if action_status.get(dep) != "success"), None)
-        if blocked_dep:
-            skipped = ActionResult(
-                system=system or "jira",
-                action=action or "unknown_action",
-                status="skipped",
-                error=f"Skipped because dependency '{blocked_dep}' did not succeed.",
-            ).model_dump()
-            results.append(skipped)
-            action_status[action or "unknown_action"] = "skipped"
-            continue
 
-        try:
-            params = _enrich_action_params_with_context(
-                deps=deps,
-                state=state,
-                action=action or "",
-                system=system or "",
-                params=params,
-            )
-            params, precheck_error = _prepare_action_params(
-                state=state,
-                action=action or "",
-                system=system or "",
-                params=params,
-                action_data=action_data,
-            )
-            if precheck_error:
-                failed = ActionResult(
-                    system=system or "jira",
-                    action=action or "unknown_action",
-                    status="failed",
-                    error=precheck_error,
+def _execute_actions_parallel(state: WorkflowState, deps: NodeDeps, action_plans: list[dict]) -> WorkflowState:
+    errors = list(state.get("errors", []))
+    indexed = [{"index": i, "item": item} for i, item in enumerate(action_plans)]
+    results_by_index: dict[int, dict] = {}
+    action_status: dict[str, str] = {}
+    action_data: dict[str, dict] = {}
+    pending = list(indexed)
+    max_workers = _action_max_parallel()
+
+    while pending:
+        ready: list[dict] = []
+        next_pending: list[dict] = []
+        progressed = False
+
+        for wrapped in pending:
+            item = wrapped["item"]
+            action = item.get("action") or "unknown_action"
+            depends_on = item.get("depends_on", []) if isinstance(item.get("depends_on"), list) else []
+            blocked_dep = next((dep for dep in depends_on if action_status.get(dep) in {"failed", "skipped"}), None)
+            if blocked_dep:
+                skipped = ActionResult(
+                    system=item.get("system") or "jira",
+                    action=action,
+                    status="skipped",
+                    error=f"Skipped because dependency '{blocked_dep}' did not succeed.",
                 ).model_dump()
-                results.append(failed)
-                action_status[action or "unknown_action"] = "failed"
-                errors.append(f"{failed['system']}:{failed['action']} failed: {precheck_error}")
+                results_by_index[int(wrapped["index"])] = skipped
+                action_status[str(action)] = "skipped"
+                progressed = True
                 continue
-
-            if system == "telegram" and action == "telegram_send_message":
-                text = params.get("text") if isinstance(params, dict) else None
-                if not isinstance(text, str) or not text.strip():
-                    params = dict(params) if isinstance(params, dict) else {}
-                    params["text"] = _compose_telegram_text(state)
-
-            if system == "jira":
-                result = deps.jira.execute_action(action=action, params=params)
-            elif system == "slack":
-                result = {
-                    "system": "slack",
-                    "action": action or "slack_unknown",
-                    "status": "failed",
-                    "error": "Slack integration is not supported yet in this environment. Please use Telegram actions (telegram_send_message).",
-                }
-            elif system == "telegram":
-                result = deps.telegram.execute_action(action=action, params=params)
+            unresolved = any(dep not in action_status for dep in depends_on)
+            if unresolved:
+                next_pending.append(wrapped)
             else:
-                result = {
-                    "system": system or "unknown",
-                    "action": action or "unknown",
-                    "status": "failed",
-                    "error": f"Unsupported system: {system}",
-                }
-            action_result = ActionResult.model_validate(result).model_dump()
-            if action_result.get("status") == "failed" and action_result.get("error"):
-                errors.append(f"{action_result['system']}:{action_result['action']} failed: {action_result['error']}")
-            key = action or "unknown_action"
-            action_status[key] = action_result.get("status", "failed")
-            if action_result.get("status") == "success":
-                data_payload = action_result.get("data")
-                if isinstance(data_payload, dict):
-                    action_data[key] = data_payload
-        except Exception as exc:
-            action_result = ActionResult(
+                ready.append(wrapped)
+
+        if ready:
+            progressed = True
+            workers = min(max_workers, len(ready))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(
+                        _run_action_item,
+                        deps=deps,
+                        state=state,
+                        item=wrapped["item"],
+                        index=int(wrapped["index"]),
+                        action_status=action_status,
+                        action_data=action_data,
+                    )
+                    for wrapped in ready
+                ]
+                for future in futures:
+                    outcome = future.result()
+                    result = outcome["result"]
+                    idx = int(outcome["index"])
+                    key = str(outcome["key"])
+                    results_by_index[idx] = result
+                    status = str(result.get("status", "failed"))
+                    action_status[key] = status
+                    if status == "success":
+                        data_payload = result.get("data")
+                        if isinstance(data_payload, dict):
+                            action_data[key] = data_payload
+                    if status == "failed" and result.get("error"):
+                        errors.append(f"{result['system']}:{result['action']} failed: {result['error']}")
+
+        if not progressed and next_pending:
+            # Unresolvable dependencies (cycle or missing action); mark remaining as skipped.
+            for wrapped in next_pending:
+                item = wrapped["item"]
+                action = item.get("action") or "unknown_action"
+                skipped = ActionResult(
+                    system=item.get("system") or "jira",
+                    action=action,
+                    status="skipped",
+                    error="Skipped due to unresolved dependency graph.",
+                ).model_dump()
+                results_by_index[int(wrapped["index"])] = skipped
+                action_status[str(action)] = "skipped"
+            break
+
+        pending = next_pending
+
+    results = [results_by_index[i] for i in range(len(action_plans)) if i in results_by_index]
+    return {"action_results": results, "errors": errors}
+
+
+def _run_action_item(
+    *,
+    deps: NodeDeps,
+    state: WorkflowState,
+    item: dict,
+    index: int,
+    action_status: dict[str, str],
+    action_data: dict[str, dict],
+) -> dict:
+    system = item.get("system")
+    action = item.get("action")
+    params = item.get("params", {}) if isinstance(item.get("params"), dict) else {}
+    key = action or f"unknown_action_{index}"
+    depends_on = item.get("depends_on", []) if isinstance(item.get("depends_on"), list) else []
+
+    blocked_dep = next((dep for dep in depends_on if action_status.get(dep) != "success"), None)
+    if blocked_dep:
+        skipped = ActionResult(
+            system=system or "jira",
+            action=action or "unknown_action",
+            status="skipped",
+            error=f"Skipped because dependency '{blocked_dep}' did not succeed.",
+        ).model_dump()
+        return {"index": index, "key": key, "result": skipped}
+
+    try:
+        params = _enrich_action_params_with_context(
+            deps=deps,
+            state=state,
+            action=action or "",
+            system=system or "",
+            params=params,
+        )
+        params, precheck_error = _prepare_action_params(
+            state=state,
+            action=action or "",
+            system=system or "",
+            params=params,
+            action_data=action_data,
+        )
+        if precheck_error:
+            failed = ActionResult(
                 system=system or "jira",
                 action=action or "unknown_action",
                 status="failed",
-                error=str(exc),
+                error=precheck_error,
             ).model_dump()
-            errors.append(f"{action_result['system']}:{action_result['action']} failed: {exc}")
-            action_status[action or "unknown_action"] = "failed"
+            return {"index": index, "key": key, "result": failed}
 
-        results.append(action_result)
+        if system == "telegram" and action == "telegram_send_message":
+            text = params.get("text") if isinstance(params, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                params = dict(params) if isinstance(params, dict) else {}
+                params["text"] = _compose_telegram_text(state)
 
-    return {"action_results": results, "errors": errors}
+        if system == "jira":
+            result = deps.jira.execute_action(action=action, params=params)
+        elif system == "slack":
+            result = {
+                "system": "slack",
+                "action": action or "slack_unknown",
+                "status": "failed",
+                "error": "Slack integration is not supported yet in this environment. Please use Telegram actions (telegram_send_message).",
+            }
+        elif system == "telegram":
+            result = deps.telegram.execute_action(action=action, params=params)
+        else:
+            result = {
+                "system": system or "unknown",
+                "action": action or "unknown",
+                "status": "failed",
+                "error": f"Unsupported system: {system}",
+            }
+        action_result = ActionResult.model_validate(result).model_dump()
+        return {"index": index, "key": key, "result": action_result}
+    except Exception as exc:
+        failed = ActionResult(
+            system=system or "jira",
+            action=action or "unknown_action",
+            status="failed",
+            error=str(exc),
+        ).model_dump()
+        return {"index": index, "key": key, "result": failed}
+
+
+def _action_max_parallel() -> int:
+    raw = os.getenv("ACTION_MAX_PARALLEL", "4").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = 4
+    return max(1, min(value, 16))
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_run_actions_in_parallel(state: WorkflowState) -> bool:
+    if isinstance(state.get("accept_parallel"), bool):
+        return bool(state.get("accept_parallel"))
+    return _env_bool("ACCEPT_PARALLEL", False)
 
 
 def aggregate_node(state: WorkflowState) -> WorkflowState:
