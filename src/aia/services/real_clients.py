@@ -1,5 +1,6 @@
 import json
 import re
+import copy
 from typing import Any
 
 import httpx
@@ -138,18 +139,13 @@ class JiraApiClient:
 
     def execute_action(self, *, action: str, params: dict[str, Any]) -> dict[str, Any]:
         if action == "jira_search_issues":
-            # Jira Cloud deprecated /search for some tenants; prefer /search/jql and fallback.
-            primary = self._client.post("/rest/api/3/search/jql", json=params)
-            if primary.status_code in {404, 405, 410}:
-                fallback = self._client.post("/rest/api/3/search", json=params)
-                return _jira_response(action, fallback)
-            return _jira_response(action, primary)
+            return self._search_issues(params)
         if action == "jira_get_issue":
             issue_key = params["issue_key"]
             resp = self._client.get(f"/rest/api/3/issue/{issue_key}")
             return _jira_response(action, resp)
         if action == "jira_create_issue":
-            resp = self._client.post("/rest/api/3/issue", json=params)
+            resp = self._create_issue_with_scope_fallback(params)
             data = _jira_response(action, resp)
             if data.get("status") != "success":
                 return data
@@ -183,6 +179,45 @@ class JiraApiClient:
             resp = self._client.post("/rest/api/3/issue/bulk", json=params)
             return _jira_response(action, resp)
         raise ValueError(f"Unsupported Jira action: {action}")
+
+    def _create_issue_with_scope_fallback(self, params: dict[str, Any]) -> httpx.Response:
+        primary = self._client.post("/rest/api/3/issue", json=params)
+        if primary.status_code < 400:
+            return primary
+        alternate = _toggle_jira_issue_scope_payload(params)
+        if alternate is None:
+            return primary
+        secondary = self._client.post("/rest/api/3/issue", json=alternate)
+        if secondary.status_code < 400:
+            return secondary
+        return primary
+
+    def _search_issues(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Newer Jira Cloud tenants require /search/jql and can be strict on payload format.
+        # Try multiple compatible variants before failing.
+        attempts: list[httpx.Response] = []
+        jql = params.get("jql")
+        max_results = params.get("maxResults", 20)
+        fields = params.get("fields")
+
+        # 1) POST /search/jql (new path)
+        attempts.append(self._client.post("/rest/api/3/search/jql", json=params))
+        # 2) GET /search/jql (some tenants)
+        query_params = {"jql": jql, "maxResults": max_results}
+        if isinstance(fields, list):
+            query_params["fields"] = ",".join(str(x) for x in fields)
+        attempts.append(self._client.get("/rest/api/3/search/jql", params=query_params))
+        # 3) POST /search (legacy)
+        attempts.append(self._client.post("/rest/api/3/search", json=params))
+        # 4) GET /search (legacy)
+        attempts.append(self._client.get("/rest/api/3/search", params=query_params))
+
+        for resp in attempts:
+            if resp.status_code < 400:
+                return _jira_response("jira_search_issues", resp)
+
+        # Return the most informative failure response (prefer 4xx body from first attempt).
+        return _jira_response("jira_search_issues", attempts[0])
 
 
 class SlackApiClient:
@@ -274,11 +309,18 @@ class TelegramApiClient:
 
 def _jira_response(action: str, resp: httpx.Response) -> dict[str, Any]:
     if resp.status_code >= 400:
+        hint = ""
+        text = (resp.text or "")[:400]
+        lowered = text.lower()
+        if "project" in lowered and "could not find" in lowered:
+            hint = " Verify JIRA_DEFAULT_SPACE_KEY/JIRA_DEFAULT_PROJECT_KEY and Jira permissions."
+        elif "field" in lowered and ("space" in lowered or "project" in lowered):
+            hint = " Check Jira create payload scope field (fields.space vs fields.project) and tenant support."
         return {
             "system": "jira",
             "action": action,
             "status": "failed",
-            "error": f"http_{resp.status_code}: {resp.text[:400]}",
+            "error": f"http_{resp.status_code}: {text}{hint}",
         }
     data = {}
     if resp.text:
@@ -335,3 +377,21 @@ def _extract_json(text: str) -> dict[str, Any] | list[Any]:
     if not first_obj:
         raise ValueError("Model output is not valid JSON")
     return json.loads(first_obj.group(1))
+
+
+def _toggle_jira_issue_scope_payload(params: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(params, dict):
+        return None
+    payload = copy.deepcopy(params)
+    fields = payload.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    has_project = "project" in fields
+    has_space = "space" in fields
+    if has_project and not has_space:
+        fields["space"] = fields.pop("project")
+        return payload
+    if has_space and not has_project:
+        fields["project"] = fields.pop("space")
+        return payload
+    return None

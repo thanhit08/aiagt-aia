@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -266,9 +267,31 @@ def _is_file_delivery_without_explicit_jira(state: WorkflowState) -> bool:
 def _is_file_to_jira_create_intent(state: WorkflowState) -> bool:
     instruction = _current_request_text(state).lower()
     file_scoped_phrases = ("in the file", "from the file", "uploaded file", "this file", "file related")
-    create_phrases = ("add ticket", "create ticket", "create issue", "open ticket", "file ticket")
+    create_phrases = (
+        "add ticket",
+        "add tickets",
+        "create ticket",
+        "create tickets",
+        "create issue",
+        "create issues",
+        "open ticket",
+        "open tickets",
+        "file ticket",
+        "file tickets",
+        "raise ticket",
+        "raise tickets",
+        "log ticket",
+        "log tickets",
+    )
     asks_file_scope = any(p in instruction for p in file_scoped_phrases)
-    asks_create = any(p in instruction for p in create_phrases)
+    asks_create_phrase = any(p in instruction for p in create_phrases)
+    asks_create_pattern = bool(
+        re.search(
+            r"\b(create|add|open|file|raise|log)\b[\w\s]{0,30}\b(ticket|tickets|issue|issues|bug|bugs)\b",
+            instruction,
+        )
+    )
+    asks_create = asks_create_phrase or asks_create_pattern
     asks_jira = "jira" in instruction
     return asks_file_scope and asks_create and asks_jira
 
@@ -276,9 +299,23 @@ def _is_file_to_jira_create_intent(state: WorkflowState) -> bool:
 def _drop_unneeded_jira_search_for_create_intent(state: WorkflowState, action_plans: list[dict]) -> list[dict]:
     instruction = _current_request_text(state).lower()
     # Keep jira search only when user explicitly asks to search/list/find in Jira.
-    explicit_search_markers = ("search jira", "find in jira", "list jira")
+    explicit_search_markers = (
+        "search jira",
+        "search in jira",
+        "find in jira",
+        "list jira",
+        "list issues in jira",
+        "issues assigned to me in jira",
+        "find issues assigned",
+        "search issues assigned",
+    )
     explicit_assign_markers = ("assign to", "assign ticket", "assign issue")
-    keep_search = any(marker in instruction for marker in explicit_search_markers)
+    asks_jira = "jira" in instruction
+    asks_search_verb = any(v in instruction for v in ("search", "find", "list", "query", "look up"))
+    asks_jira_source = any(s in instruction for s in ("in jira", "from jira", "on jira", "jira issues", "issues in jira"))
+    keep_search = any(marker in instruction for marker in explicit_search_markers) or (
+        asks_jira and asks_search_verb and asks_jira_source
+    )
     keep_assign = any(marker in instruction for marker in explicit_assign_markers)
     filtered = list(action_plans)
     if not keep_search:
@@ -455,17 +492,17 @@ def _prepare_jira_create_issue_params(state: WorkflowState, params: dict) -> tup
     else:
         fields = {}
 
-    project_key = (
-        os.getenv("JIRA_DEFAULT_PROJECT_KEY", "").strip()
-        or os.getenv("JIRA_PROJECT_KEY", "").strip()
-    )
+    scope_field, scope_key = _resolve_jira_scope_field_and_key()
     issue_type = os.getenv("JIRA_DEFAULT_ISSUE_TYPE", "Bug").strip() or "Bug"
     summary, description = _derive_issue_content_from_state(state)
 
-    if "project" not in fields:
-        if not project_key:
-            return params, "jira_create_issue requires project key. Set JIRA_DEFAULT_PROJECT_KEY or provide fields.project."
-        fields["project"] = {"key": project_key}
+    if "project" not in fields and "space" not in fields:
+        if not scope_key:
+            return (
+                params,
+                "jira_create_issue requires scope key. Set JIRA_DEFAULT_SPACE_KEY (preferred) or JIRA_DEFAULT_PROJECT_KEY (legacy), or provide fields.space/fields.project.",
+            )
+        fields[scope_field] = {"key": scope_key}
     if "issuetype" not in fields:
         fields["issuetype"] = {"name": issue_type}
     if "summary" not in fields:
@@ -523,6 +560,44 @@ def _to_jira_adf(text: str) -> dict:
             }
         ],
     }
+
+
+def _resolve_jira_project_key() -> str:
+    key = (
+        os.getenv("JIRA_DEFAULT_PROJECT_KEY", "").strip()
+        or os.getenv("JIRA_PROJECT_KEY", "").strip()
+        or os.getenv("PROJECT_KEY", "").strip()
+    )
+    # Common placeholder values copied from examples. These are not real Jira project keys.
+    if key.upper() in {"PROJ", "PROJECT_KEY", "YOUR_PROJECT_KEY"}:
+        return ""
+    return key
+
+
+def _resolve_jira_space_key() -> str:
+    key = (
+        os.getenv("JIRA_DEFAULT_SPACE_KEY", "").strip()
+        or os.getenv("JIRA_SPACE_KEY", "").strip()
+        or os.getenv("SPACE_KEY", "").strip()
+    )
+    # Common placeholder values copied from examples. These are not real Jira space keys.
+    if key.upper() in {"SPACE", "SPACE_KEY", "YOUR_SPACE_KEY"}:
+        return ""
+    return key
+
+
+def _resolve_jira_scope_field_and_key() -> tuple[str, str]:
+    mode = os.getenv("JIRA_SCOPE_MODE", "auto").strip().lower()
+    space_key = _resolve_jira_space_key()
+    project_key = _resolve_jira_project_key()
+    if mode == "space":
+        return "space", (space_key or project_key)
+    if mode == "project":
+        return "project", (project_key or space_key)
+    # auto mode: prefer space when available, then fallback to project.
+    if space_key:
+        return "space", space_key
+    return "project", project_key
 
 
 def _sanitize_telegram_chat_params(state: WorkflowState, params: dict) -> dict:

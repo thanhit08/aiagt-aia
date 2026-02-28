@@ -89,6 +89,103 @@ The LLM enrichment response did not match the strict `EnrichedTask` schema:
 ### Prevention
 - Cache only stable successful outputs, or include failure-aware invalidation policy.
 
+## 2026-02-28 - Jira create issue fails due missing/placeholder project key
+
+### Symptom
+- `jira_create_issue` fails or is preblocked when project key is not configured correctly.
+- User expected `PROJECT_KEY=PROJ` style config to work.
+
+### Root Cause
+- Runtime only prioritized `JIRA_DEFAULT_PROJECT_KEY` / `JIRA_PROJECT_KEY`.
+- Plain `PROJECT_KEY` alias was not resolved in create-issue prep.
+- Placeholder value `PROJ` (from examples) may be copied as-is but not exist in Jira tenant.
+
+### Resolution
+- Updated [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - add project key resolver precedence:
+    - `JIRA_DEFAULT_PROJECT_KEY`
+    - `JIRA_PROJECT_KEY`
+    - `PROJECT_KEY`
+  - reject known placeholder values (`PROJ`, `PROJECT_KEY`, `YOUR_PROJECT_KEY`) and return actionable precheck error.
+- Updated [.env.example](E:/2026/AIA/.env.example) to include explicit Jira project env vars and aliases.
+- Added tests in [tests/test_jira_project_key_resolution.py](E:/2026/AIA/tests/test_jira_project_key_resolution.py).
+
+### Prevention
+- Always set a real Jira project key from your tenant (for example, `ENG`, `QA`, `AIA`) instead of template placeholders.
+
+## 2026-02-28 - Route plan adds `jira_search_issues` for file->Telegram+Jira-create intent
+
+### Symptom
+- For instruction like:
+  - "Retrieve issues from file ... send to Telegram ... create Jira tickets"
+- Route still contained:
+  - `jira_search_issues`
+  - `telegram_send_message`
+  - `jira_create_issue`
+- User did not ask to search Jira.
+
+### Root Cause
+- Intent parser used narrow create markers (`create ticket`, `add ticket`, etc.).
+- Phrase variants like `create Jira tickets` were not matched reliably, so search-pruning policy did not activate.
+
+### Resolution
+- Updated [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - broaden create-intent detection with plural/synonym phrases and regex pattern matching.
+  - keep Jira search only when request explicitly asks searching/listing/finding in Jira.
+  - reconcile dependencies after pruning to remove stale `depends_on`.
+- Added regression coverage in [tests/test_route_intent_filters.py](E:/2026/AIA/tests/test_route_intent_filters.py) for the exact instruction shape.
+- Tightened planner prompt in [enrichment.system.md](E:/2026/AIA/specs/v1/prompts/enrichment.system.md) to forbid auto-adding Jira search in file-scoped create-ticket flows.
+
+### Prevention
+- Keep route pruning policy intent-based and phrase-robust; do not trust planner defaults for optional search actions.
+
+## 2026-02-28 - Jira search API compatibility instability across tenants
+
+### Symptom
+- Jira search actions intermittently fail across tenants with API/version differences.
+
+### Root Cause
+- Some Jira Cloud tenants require `/rest/api/3/search/jql`; others still accept `/search`.
+- Method/payload expectations vary (`POST` JSON vs `GET` query params).
+
+### Resolution
+- Updated [src/aia/services/real_clients.py](E:/2026/AIA/src/aia/services/real_clients.py):
+  - for `jira_search_issues`, try compatible variants in order:
+    - `POST /rest/api/3/search/jql`
+    - `GET /rest/api/3/search/jql`
+    - `POST /rest/api/3/search`
+    - `GET /rest/api/3/search`
+  - return first successful response; otherwise return structured failure.
+
+### Prevention
+- Use multi-path compatibility for Jira search endpoints in real-service mode.
+
+## 2026-02-28 - Jira taxonomy shift from project to space
+
+### Symptom
+- Jira issue creation fails in environments that now use `space` semantics/configuration.
+
+### Root Cause
+- Create payload/config previously centered on `fields.project` and project-key env vars only.
+
+### Resolution
+- Updated [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - add scope resolver with dual support:
+    - preferred: `JIRA_DEFAULT_SPACE_KEY` / `JIRA_SPACE_KEY` / `SPACE_KEY`
+    - legacy: `JIRA_DEFAULT_PROJECT_KEY` / `JIRA_PROJECT_KEY` / `PROJECT_KEY`
+  - add `JIRA_SCOPE_MODE` (`auto|space|project`) to control payload field selection.
+  - default `auto` prefers `space` when configured, else falls back to `project`.
+- Updated [src/aia/services/real_clients.py](E:/2026/AIA/src/aia/services/real_clients.py):
+  - Jira create issue now retries with toggled scope field (`project` <-> `space`) if first attempt fails.
+- Updated [.env.example](E:/2026/AIA/.env.example) with new Jira scope variables.
+- Added tests:
+  - [tests/test_jira_project_key_resolution.py](E:/2026/AIA/tests/test_jira_project_key_resolution.py)
+  - [tests/test_jira_scope_payload_toggle.py](E:/2026/AIA/tests/test_jira_scope_payload_toggle.py)
+
+### Prevention
+- During migration, run with `JIRA_SCOPE_MODE=auto` and set `JIRA_DEFAULT_SPACE_KEY`.
+- Keep legacy project vars only as fallback until all environments are migrated.
+
 ## 2026-02-27 - Jira still appears in action plan for file-to-Telegram intent
 
 ### Symptom

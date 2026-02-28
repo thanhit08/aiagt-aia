@@ -118,6 +118,54 @@ def test_file_scoped_create_ticket_to_jira_drops_unneeded_jira_search() -> None:
         assert "jira_search_issues" not in item.get("depends_on", [])
 
 
+def test_file_scoped_create_tickets_plural_drops_jira_search() -> None:
+    state = {
+        "raw_instruction": (
+            "Retrieve all issues related to accuracy from the file with ID e301dffca98d2f1f1848c079 "
+            "for the purpose of optimizing query for vector search. This information will be sent "
+            "to a Telegram channel and used to create Jira tickets."
+        ),
+        "instruction": (
+            "Current User Request:\nRetrieve all issues related to accuracy from the file with ID "
+            "e301dffca98d2f1f1848c079 for the purpose of optimizing query for vector search. "
+            "This information will be sent to a Telegram channel and used to create Jira tickets."
+        ),
+        "file_id": "e301dffca98d2f1f1848c079",
+    }
+    route_plan = {
+        "parallel": True,
+        "action_plans": [
+            {
+                "system": "jira",
+                "action": "jira_search_issues",
+                "params": {"jql": "assignee = currentUser() ORDER BY updated DESC", "maxResults": 20},
+                "risk_level": "low",
+                "depends_on": [],
+            },
+            {
+                "system": "telegram",
+                "action": "telegram_send_message",
+                "params": {"text": "Jira summary is ready."},
+                "risk_level": "low",
+                "depends_on": ["jira_search_issues"],
+            },
+            {
+                "system": "jira",
+                "action": "jira_create_issue",
+                "params": {},
+                "risk_level": "medium",
+                "depends_on": ["jira_search_issues"],
+            },
+        ],
+    }
+    result = _apply_intent_filters(state, route_plan)
+    actions = [x["action"] for x in result["action_plans"]]
+    assert "jira_search_issues" not in actions
+    assert "jira_create_issue" in actions
+    for item in result["action_plans"]:
+        assert "jira_search_issues" not in item.get("depends_on", [])
+
+
 def test_file_scoped_request_with_jira_keeps_jira_actions() -> None:
     state = {
         "instruction": "Current User Request:\nUse the uploaded file and create Jira tickets for accuracy issues",

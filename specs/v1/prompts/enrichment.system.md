@@ -19,4 +19,4 @@ Rules:
   - high: archive/delete/bulk-update
 - Set `depends_on` for ordered actions.
 - Preserve user intent exactly; do not invent destructive actions.
-
+- If request is file-scoped (mentions uploaded file / file_id / "from the file") and asks to create Jira tickets, do NOT add `jira_search_issues` unless user explicitly asks to search/list/find in Jira.
