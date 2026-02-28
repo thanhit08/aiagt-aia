@@ -120,7 +120,7 @@ def _normalize_system(action: dict[str, Any]) -> str:
             return "slack"
         if "jira" in lowered:
             return "jira"
-    return "jira"
+    return "unknown"
 
 
 def _normalize_depends_on(value: Any) -> list[str]:
@@ -144,6 +144,9 @@ def _normalize_action_name(system: str, value: Any) -> str | None:
     # Cross-system pseudo-action emitted by LLM.
     if normalized == "jira_send_summary_to_telegram":
         return "telegram_send_message"
+
+    if normalized.startswith("jira_") or normalized.startswith("slack_") or normalized.startswith("telegram_"):
+        return normalized
 
     # If model returns bare verbs for known systems, prefix canonical namespace.
     if system == "jira" and not normalized.startswith("jira_"):
@@ -205,7 +208,16 @@ def _normalize_action(action: Any) -> dict[str, Any] | None:
         return None
 
     system = _normalize_system(action)
-    name = _normalize_action_name(system, action.get("action"))
+    raw_name = action.get("action")
+    if isinstance(raw_name, str):
+        lowered = raw_name.strip().lower()
+        if lowered.startswith("telegram_"):
+            system = "telegram"
+        elif lowered.startswith("jira_"):
+            system = "jira"
+        elif lowered.startswith("slack_"):
+            system = "slack"
+    name = _normalize_action_name(system, raw_name)
     if not name:
         return None
     if name.startswith("telegram_"):

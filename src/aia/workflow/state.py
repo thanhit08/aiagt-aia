@@ -5,6 +5,7 @@ class WorkflowState(TypedDict, total=False):
     request_id: str
     user_id: str
     instruction: str
+    raw_instruction: str
     file_id: str
     trace_id: str
     enriched_task: dict

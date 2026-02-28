@@ -26,11 +26,20 @@ digraph AIA {
   rag [label="RAG (Optional)"];
   answer [label="Answer"];
   route [label="Route Plan"];
-  exec [label="Execute Actions"];
+  exec [label="Execute Actions Dispatcher"];
+  fanout [label="Parallel Actions", shape=diamond, fillcolor="#eef2ff"];
+  jira [label="Jira Action(s)"];
+  telegram [label="Telegram Action(s)"];
+  join [label="All Actions Completed", shape=diamond, fillcolor="#eef2ff"];
   aggregate [label="Aggregate"];
-  tools [label="Jira / Telegram"];
-  user -> intake -> enrich -> rag -> answer -> route -> exec -> aggregate;
-  exec -> tools;
+  done [label="Done"];
+
+  user -> intake -> enrich -> rag -> answer -> route -> exec -> fanout;
+  fanout -> jira;
+  fanout -> telegram;
+  jira -> join;
+  telegram -> join;
+  join -> aggregate -> done;
 }
 """
     )

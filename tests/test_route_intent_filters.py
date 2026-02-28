@@ -4,7 +4,51 @@ from aia.workflow.nodes import _compose_telegram_text
 
 def test_file_scoped_request_without_jira_drops_jira_actions() -> None:
     state = {
+        "raw_instruction": "Get all issues in the file related to accuracy and send to Telegram channel",
         "instruction": "Current User Request:\nGet all issues in the file related to accuracy and send to Telegram channel",
+    }
+    route_plan = {
+        "parallel": True,
+        "action_plans": [
+            {"system": "jira", "action": "jira_search_issues", "params": {}, "risk_level": "low", "depends_on": []},
+            {
+                "system": "telegram",
+                "action": "telegram_send_message",
+                "params": {"text": "summary"},
+                "risk_level": "low",
+                "depends_on": [],
+            },
+        ],
+    }
+    result = _apply_intent_filters(state, route_plan)
+    systems = [x["system"] for x in result["action_plans"]]
+    assert systems == ["telegram"]
+
+
+def test_file_scoped_intent_without_file_id_still_drops_jira() -> None:
+    state = {
+        "raw_instruction": "Get all issues in the file related to accuracy and send to Telegram channel",
+        "instruction": "Current User Request:\nGet all issues in the file related to accuracy and send to Telegram channel",
+    }
+    route_plan = {
+        "parallel": True,
+        "action_plans": [
+            {"system": "jira", "action": "jira_search_issues", "params": {}, "risk_level": "low", "depends_on": []},
+            {"system": "telegram", "action": "telegram_send_message", "params": {}, "risk_level": "low", "depends_on": []},
+        ],
+    }
+    result = _apply_intent_filters(state, route_plan)
+    systems = [x["system"] for x in result["action_plans"]]
+    assert systems == ["telegram"]
+
+
+def test_file_scoped_raw_instruction_overrides_jira_in_history_context() -> None:
+    state = {
+        "raw_instruction": "Get all issues in the file related to accuracy and send to Telegram channel",
+        "instruction": (
+            "Current User Request:\nGet all issues in the file related to accuracy and send to Telegram channel\n\n"
+            "Conversation Summary:\nEarlier task asked to find issues assigned to me in Jira"
+        ),
         "file_id": "f1",
     }
     route_plan = {
@@ -23,6 +67,55 @@ def test_file_scoped_request_without_jira_drops_jira_actions() -> None:
     result = _apply_intent_filters(state, route_plan)
     systems = [x["system"] for x in result["action_plans"]]
     assert systems == ["telegram"]
+
+
+def test_file_scoped_create_ticket_to_jira_drops_unneeded_jira_search() -> None:
+    state = {
+        "raw_instruction": "Get all issues in the file related to accuracy and send to Telegram channel and add ticket to Jira",
+        "instruction": "Current User Request:\nGet all issues in the file related to accuracy and send to Telegram channel and add ticket to Jira",
+        "file_id": "f1",
+    }
+    route_plan = {
+        "parallel": True,
+        "action_plans": [
+            {
+                "system": "jira",
+                "action": "jira_search_issues",
+                "params": {"jql": "assignee = currentUser()"},
+                "risk_level": "low",
+                "depends_on": [],
+            },
+            {
+                "system": "telegram",
+                "action": "telegram_send_message",
+                "params": {},
+                "risk_level": "low",
+                "depends_on": ["jira_search_issues"],
+            },
+            {
+                "system": "jira",
+                "action": "jira_create_issue",
+                "params": {},
+                "risk_level": "medium",
+                "depends_on": ["jira_search_issues"],
+            },
+            {
+                "system": "jira",
+                "action": "jira_assign_issue",
+                "params": {},
+                "risk_level": "medium",
+                "depends_on": ["jira_create_issue"],
+            },
+        ],
+    }
+    result = _apply_intent_filters(state, route_plan)
+    actions = [x["action"] for x in result["action_plans"]]
+    assert "jira_search_issues" not in actions
+    assert "jira_create_issue" in actions
+    assert "jira_assign_issue" not in actions
+    # deps should be reconciled after pruning removed actions
+    for item in result["action_plans"]:
+        assert "jira_search_issues" not in item.get("depends_on", [])
 
 
 def test_file_scoped_request_with_jira_keeps_jira_actions() -> None:

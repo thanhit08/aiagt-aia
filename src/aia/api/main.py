@@ -117,6 +117,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     state = {
         "request_id": request_id,
         "instruction": merged_instruction,
+        "raw_instruction": payload.instruction,
         "user_id": payload.user_id,
         "file_id": payload.file_id,
     }
@@ -437,6 +438,7 @@ def _step_snapshot(data: dict) -> dict:
     allow_keys = {
         "request_id",
         "instruction",
+        "raw_instruction",
         "enriched_task",
         "rag_context",
         "answer",

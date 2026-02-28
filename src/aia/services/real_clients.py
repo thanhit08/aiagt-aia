@@ -151,9 +151,14 @@ class JiraApiClient:
         if action == "jira_create_issue":
             resp = self._client.post("/rest/api/3/issue", json=params)
             data = _jira_response(action, resp)
-            key = data["data"].get("key")
+            if data.get("status") != "success":
+                return data
+            payload = data.get("data")
+            if not isinstance(payload, dict):
+                return data
+            key = payload.get("key")
             if key:
-                data["data"]["url"] = f"{self._client.base_url}browse/{key}"
+                payload["url"] = f"{self._client.base_url}browse/{key}"
             return data
         if action == "jira_update_issue":
             issue_key = params.pop("issue_key")

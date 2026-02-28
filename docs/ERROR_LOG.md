@@ -37,6 +37,169 @@ The LLM enrichment response did not match the strict `EnrichedTask` schema:
 
 ### Verification
 - Local compile checks passed for updated modules.
+
+## 2026-02-27 - Jira still appears in action plan for file-to-Telegram intent
+
+### Symptom
+- For request "Get all issues in the file related to accuracy and send to Telegram channel", `action_plans` still contained:
+  - Jira `jira_search_issues`
+  - Telegram `telegram_send_message`
+
+### Root Cause
+- Intent filter `_is_file_delivery_without_explicit_jira` required `file_id` to be present.
+- When `file_id` was absent or not propagated in a given run, Jira pruning policy did not activate.
+
+### Why This Happened
+- Policy mixed semantic intent check with transport payload availability.
+- User intent ("in the file" + "send to Telegram") should drive routing constraints regardless of missing `file_id`.
+
+### Resolution
+- Updated intent filter in [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - remove hard dependency on `file_id`
+  - trigger Jira pruning from instruction intent only:
+    - file-scoped phrase present
+    - Telegram requested
+    - Jira not explicitly requested
+- Added regression test in [tests/test_route_intent_filters.py](E:/2026/AIA/tests/test_route_intent_filters.py) for no-`file_id` scenario.
+
+### Prevention
+- Use user intent as source of truth for routing constraints.
+- Keep payload availability checks separate from intent policies.
+
+### Verification
+- Compile checks passed for updated node/test files.
+
+## 2026-02-27 - Jira create/assign chain failed in mixed file->Telegram->Jira flow
+
+### Symptom
+- `jira_create_issue` failed with:
+  - `project: Could not find project by id or key`
+- `jira_assign_issue` failed with:
+  - missing `issue_key`
+
+### Root Cause
+- Planner emitted `jira_create_issue` with empty params (`{}`), missing required Jira `fields.project` and ticket content.
+- Planner emitted `jira_assign_issue` without guaranteed `issue_key` and assign preconditions.
+- Runtime execution did not enforce dependency success before executing dependent actions.
+
+### Why This Happened
+- Parameter preparation for Jira actions was not deterministic.
+- Dependency semantics in `depends_on` were not enforced in executor.
+
+### Resolution
+- Updated [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - Add dependency-aware execution: actions are skipped when dependency fails.
+  - Add Jira create param builder:
+    - derive `fields.summary` + `fields.description` from request/RAG context
+    - require project key via `JIRA_DEFAULT_PROJECT_KEY` (or existing `fields.project`)
+    - default issue type from `JIRA_DEFAULT_ISSUE_TYPE` (default `Bug`)
+  - Add Jira assign param prep:
+    - derive `issue_key` from successful `jira_create_issue`
+    - require `accountId` or `JIRA_DEFAULT_ASSIGNEE_ACCOUNT_ID`
+  - Add clearer deterministic validation errors instead of raw exceptions.
+- Tightened mixed-intent action policy:
+  - drop unneeded `jira_search_issues` and `jira_assign_issue` unless explicitly requested.
+
+### Prevention
+- Enforce pre-execution parameter validation for write actions.
+- Enforce dependency success before running dependent actions.
+- Do not execute planner-generated optional actions unless explicitly requested by intent.
+
+### Verification
+- Local compile checks passed for updated workflow modules.
+
+## 2026-02-28 - Answer step output contradicted user intent (unrequested Jira tickets)
+
+### Symptom
+- Request: "Get all issues in the file related to accuracy and send to Telegram channel."
+- Answer node output included: "create Jira ticket(s) according to your request."
+- This contradicted the original request and confused downstream behavior.
+
+### Root Cause
+- Answer fallback normalization used a hardcoded recovery sentence that always mentioned Jira tickets in some branches.
+- Post-processing did not validate answer text against requested systems/actions.
+
+### Why This Happened
+- Defensive answer fallback was implemented for missing-input prompts, but it was not intent-aware.
+- No guard removed unrequested Jira commitments from final answer text.
+
+### Resolution
+- Added intent-aware answer normalization in [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - `_normalize_answer_to_intent(answer, state)`
+  - strips Jira/ticket commitments when user did not request Jira
+  - preserves Jira references when Jira is explicitly requested
+  - provides file+telegram grounded fallback text for missing-input prompt cases
+- Added targeted regression tests in [tests/test_answer_normalization.py](E:/2026/AIA/tests/test_answer_normalization.py).
+
+### Prevention
+- Always run answer output through intent-consistency checks before returning.
+- Keep fallback templates dynamic to requested channels/tools, never hardcoded to one system.
+
+### Verification
+- Compile checks passed for updated modules and tests.
+
+## 2026-02-27 - Jira create issue failed with error `'data'`
+
+### Symptom
+- Action result:
+  - `system: jira`
+  - `action: jira_create_issue`
+  - `status: failed`
+  - `error: 'data'`
+
+### Root Cause
+- `jira_create_issue` handler assumed `_jira_response(...)` always returned a successful payload with `data` object.
+- On Jira API failure, `_jira_response` returns `{"status":"failed","error":...}` without `data`.
+- Code accessed `data["data"]` directly and raised `KeyError: 'data'`.
+
+### Why This Happened
+- Post-processing logic (extracting issue key and building browse URL) did not guard failed response shape.
+
+### Resolution
+- Updated [src/aia/services/real_clients.py](E:/2026/AIA/src/aia/services/real_clients.py):
+  - if create response is not success, return failure result directly.
+  - guard payload type before accessing issue key.
+  - only append `url` when `key` exists in successful response.
+
+### Prevention
+- Never assume success payload shape after external API calls.
+- Keep post-processing conditional on `status == success`.
+
+### Verification
+- Local compile checks passed for updated client module.
+
+## 2026-02-27 - File-scoped "add ticket to Jira" request still includes `jira_search_issues`
+
+### Symptom
+- Request: "Get all issues in the file related to accuracy and send to Telegram channel and add ticket to Jira"
+- Route/action plans included:
+  - `jira_search_issues`
+  - `telegram_send_message`
+  - `jira_create_issue`
+- Expected: no Jira search unless explicitly requested.
+
+### Root Cause
+- Planner produced extra Jira search action.
+- Post-planning policy did not prune unneeded Jira search for file-scoped create-ticket intents.
+- Dependencies still referenced removed/irrelevant actions.
+
+### Why This Happened
+- Existing policy covered "file -> telegram without Jira", but not "file -> telegram + Jira create".
+- Search action fallback remained in mixed-intent plan.
+
+### Resolution
+- Updated [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - detect file-scoped Jira create intent
+  - remove `jira_search_issues` unless user explicitly asks Jira search/list/find
+  - reconcile `depends_on` to remove references to pruned actions
+- Added regression test in [tests/test_route_intent_filters.py](E:/2026/AIA/tests/test_route_intent_filters.py).
+
+### Prevention
+- Apply deterministic policy checks after LLM planning for mixed-intent requests.
+- Always clean dependencies after action pruning.
+
+### Verification
+- Compile checks passed for updated node/test files.
 - Normalization test cases added for malformed outputs.
 
 ## 2026-02-27 - `/qa-intake` still 500 with `find_and_send_summary` and malformed action plans
@@ -315,3 +478,35 @@ The LLM enrichment response did not match the strict `EnrichedTask` schema:
 
 ### Verification
 - Compile checks passed and regression test added.
+
+## 2026-02-27 - File request intent contaminated by conversation history (Jira-biased enrichment)
+
+### Symptom
+- User asked file-scoped request: "Get all issues in the file related to accuracy and send to Telegram"
+- Enrichment/answer drifted toward Jira-assignee flow ("issues assigned to you in Jira").
+
+### Root Cause
+- Enrichment prompt consumed merged instruction containing prior conversation summary/history.
+- Older Jira-oriented context influenced current intent extraction.
+- Action normalization had a Jira-biased fallback for unknown/missing system/action combinations.
+
+### Why This Happened
+- Current request and history context were not separated for intent classification.
+- Unknown action/system fallback overfit to Jira default behavior.
+
+### Resolution
+- Added `raw_instruction` to workflow state and pass original user request from API.
+- Updated enrichment and retrieval query defaults in [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py) to use current request text, not merged history.
+- Kept conversation context available for answer generation but separated from primary instruction field.
+- Removed Jira-biased fallback path in [src/aia/workflow/enrichment.py](E:/2026/AIA/src/aia/workflow/enrichment.py):
+  - fallback system is now `unknown`
+  - canonical prefixed actions (`telegram_*`, `jira_*`, `slack_*`) infer system directly
+  - unknown values no longer implicitly map to Jira by default.
+- Added regression coverage in [tests/test_enrichment_normalization.py](E:/2026/AIA/tests/test_enrichment_normalization.py).
+
+### Prevention
+- Always separate "current user request" from "conversation memory" at intent-extraction boundary.
+- Avoid provider-biased defaults for unknown action/system values.
+
+### Verification
+- Local compile checks passed for updated modules.
