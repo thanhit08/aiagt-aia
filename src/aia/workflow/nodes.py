@@ -23,100 +23,99 @@ def intake_node(state: WorkflowState) -> WorkflowState:
     return {"trace_id": state.get("trace_id", str(uuid4())), "errors": state.get("errors", [])}
 
 
-def enrichment_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    sys_prompt = load_prompt("enrichment.system.md")
-    current_request = str(state.get("raw_instruction") or _extract_current_request_text(str(state["instruction"])))
-    user_prompt = render_template(load_prompt("enrichment.user.md"), instruction=current_request)
-    raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
-    if not isinstance(raw, dict):
-        raw = {}
-    normalized = normalize_enriched_task_raw(raw)
-    if state.get("file_id") or _should_force_rag(state):
-        normalized["requires_rag"] = True
-    try:
-        enriched = EnrichedTask.model_validate(normalized).model_dump()
-        enriched["action_plans"] = _apply_action_policy(state, enriched.get("action_plans", []))
-        return {"enriched_task": enriched}
-    except Exception as exc:
-        fallback = EnrichedTask(
-            task_type="general_query",
-            requires_rag=False,
-            output_tone="neutral",
-            rag_query_seed="",
-            action_plans=[],
-        ).model_dump()
-        errors = list(state.get("errors", []))
-        errors.append(f"enrichment_validation_fallback: {exc}")
-        return {"enriched_task": fallback, "errors": errors}
+def rag_check_node(state: WorkflowState) -> WorkflowState:
+    # New workflow rule: only file-linked requests trigger RAG path.
+    return {"rag_required": bool(state.get("file_id"))}
 
 
-def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    if not state["enriched_task"].get("requires_rag", False):
-        return {"rag_context": {"enabled": False, "hits": []}}
+def rag_query_enrichment_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    if not state.get("rag_required", False):
+        return {"rag_query_spec": {"enabled": False, "query_text": "", "collections": []}}
 
     sys_prompt = load_prompt("rag-query-builder.system.md")
     user_prompt = json.dumps(
         {
-            "enriched_task": state["enriched_task"],
+            "instruction": _current_request_text(state),
+            "file_id": state.get("file_id"),
+            "goal": "Optimize query for vector search over uploaded file content. Do not plan actions.",
         }
     )
     query_spec = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
     if not isinstance(query_spec, dict):
         query_spec = {}
+    collections = query_spec.get("collections", [])
+    if not isinstance(collections, list):
+        collections = []
+    if "uploaded_files" not in collections:
+        collections = ["uploaded_files"] + collections
+    query_text = query_spec.get("query_text")
+    if not isinstance(query_text, str) or not query_text.strip():
+        query_text = _current_request_text(state)
+    top_k = query_spec.get("top_k")
+    min_score = query_spec.get("min_score")
+    return {
+        "rag_query_spec": {
+            "enabled": True,
+            "collections": collections,
+            "query_text": query_text,
+            "top_k": int(top_k) if isinstance(top_k, int) else 20,
+            "min_score": float(min_score) if isinstance(min_score, (int, float)) else 0.0,
+        }
+    }
+
+
+def rag_context_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
+    if not state.get("rag_required", False):
+        return {"rag_context": {"enabled": False, "hits": []}, "rag_compiled_context": ""}
+
+    query_spec = state.get("rag_query_spec", {})
+    if not isinstance(query_spec, dict):
+        query_spec = {}
     collections = query_spec.get("collections", ["taxonomy", "rules", "examples"])
-    if state.get("file_id") and "uploaded_files" not in collections:
+    if not isinstance(collections, list):
+        collections = ["uploaded_files"]
+    if "uploaded_files" not in collections:
         collections = ["uploaded_files"] + collections
     hits = deps.vector_store.search(
         collections=collections,
-        query_text=query_spec.get("query_text", state.get("raw_instruction") or _extract_current_request_text(str(state["instruction"]))),
-        top_k=int(query_spec.get("top_k", 5)),
-        min_score=float(query_spec.get("min_score", 0.72)),
+        query_text=query_spec.get("query_text", _current_request_text(state)),
+        top_k=int(query_spec.get("top_k", 20)),
+        min_score=float(query_spec.get("min_score", 0.0)),
         file_id=state.get("file_id"),
     )
-    return {"rag_context": {"enabled": True, "query_spec": query_spec, "hits": hits}}
-
-
-def answer_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    sys_prompt = (
-        "You are AIA. Provide a concise, useful answer to the user's request. "
-        "If actions are requested, summarize what will be done."
-    )
-    user_prompt = json.dumps(
-        {
-            "instruction": state.get("raw_instruction") or _extract_current_request_text(str(state["instruction"])),
-            "conversation_context": state["instruction"],
-            "rag_context": state.get("rag_context", {}),
-            "enriched_task": state["enriched_task"],
-        },
-        ensure_ascii=False,
-    )
-    answer = deps.llm.complete_text(system_prompt=sys_prompt, user_prompt=user_prompt).strip()
-    if not answer:
-        answer = "Request processed."
-    answer = _normalize_answer_to_intent(answer, state)
-    return {"answer": answer}
+    compiled = _compile_rag_hits(hits)
+    return {"rag_context": {"enabled": True, "query_spec": query_spec, "hits": hits}, "rag_compiled_context": compiled}
 
 
 def route_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
-    sys_prompt = load_prompt("orchestrator-routing.system.md")
-    user_prompt = render_template(
-        load_prompt("orchestrator-routing.user.md"),
-        enriched_task_json=json.dumps(state["enriched_task"], ensure_ascii=False),
-        accuracy_context=json.dumps(state.get("rag_context", {}), ensure_ascii=False),
-        answer_text=state.get("answer", ""),
-    )
+    # New workflow: route step now performs old enrichment responsibilities.
+    sys_prompt = load_prompt("enrichment.system.md")
+    user_prompt = render_template(load_prompt("enrichment.user.md"), instruction=_current_request_text(state))
     raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
     if not isinstance(raw, dict):
         raw = {}
-    route_raw = normalize_route_plan_raw(raw, state.get("enriched_task", {}).get("action_plans", []))
+    normalized = normalize_enriched_task_raw(raw)
+    try:
+        enriched = EnrichedTask.model_validate(normalized).model_dump()
+    except Exception:
+        enriched = EnrichedTask(
+            task_type="general_query",
+            requires_rag=bool(state.get("rag_required", False)),
+            output_tone="neutral",
+            rag_query_seed="",
+            action_plans=[],
+        ).model_dump()
+    # Route must not decide RAG here; preserve upstream rag_check decision.
+    enriched["requires_rag"] = bool(state.get("rag_required", False))
+    route_raw = normalize_route_plan_raw({}, enriched.get("action_plans", []))
     try:
         route_plan = RoutePlan.model_validate(route_raw).model_dump()
         route_plan = _apply_intent_filters(state, route_plan)
-        return {"route_plan": route_plan}
+        return {"enriched_task": enriched, "route_plan": route_plan}
     except Exception as exc:
         errors = list(state.get("errors", []))
         errors.append(f"route_plan_validation_fallback: {exc}")
-        return {"route_plan": {"parallel": True, "action_plans": []}, "errors": errors}
+        return {"enriched_task": enriched, "route_plan": {"parallel": True, "action_plans": []}, "errors": errors}
 
 
 def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
@@ -145,6 +144,13 @@ def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
             continue
 
         try:
+            params = _enrich_action_params_with_context(
+                deps=deps,
+                state=state,
+                action=action or "",
+                system=system or "",
+                params=params,
+            )
             params, precheck_error = _prepare_action_params(
                 state=state,
                 action=action or "",
@@ -213,9 +219,12 @@ def execute_actions_node(state: WorkflowState, deps: NodeDeps) -> WorkflowState:
 
 
 def aggregate_node(state: WorkflowState) -> WorkflowState:
+    answer = state.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        answer = _build_final_answer(state)
     final = FinalResponse(
         request_id=state["request_id"],
-        answer=state.get("answer", "Request processed."),
+        answer=answer,
         trace_id=state["trace_id"],
         action_results=state.get("action_results", []),
         errors=state.get("errors", []),
@@ -229,17 +238,6 @@ def _apply_intent_filters(state: WorkflowState, route_plan: dict) -> dict:
 
     route_plan["action_plans"] = action_plans
     return route_plan
-
-
-def _should_force_rag(state: WorkflowState) -> bool:
-    file_id = state.get("file_id")
-    if not file_id:
-        return False
-    instruction = _current_request_text(state).lower()
-    # If a file is attached and request appears file/content-centric, require retrieval.
-    file_scoped_phrases = ("in the file", "from the file", "uploaded file", "this file", "file related")
-    content_scoped_phrases = ("accuracy", "issues", "find in", "retrieve", "summarize")
-    return any(p in instruction for p in file_scoped_phrases) or any(p in instruction for p in content_scoped_phrases)
 
 
 def _apply_action_policy(state: WorkflowState, action_plans: list[dict]) -> list[dict]:
@@ -360,41 +358,76 @@ def _compose_telegram_text(state: WorkflowState) -> str:
     return str(state.get("answer", "Request processed."))
 
 
-def _looks_like_missing_input_prompt(answer: str, state: WorkflowState) -> bool:
-    lower = answer.lower()
-    asks_for_file = "provide the file" in lower or "please provide" in lower and "file" in lower
-    asks_for_channel = "telegram channel" in lower and "provide" in lower
-    has_file = bool(state.get("file_id"))
-    asked_telegram = "telegram" in _current_request_text(state).lower()
-    return has_file and asked_telegram and (asks_for_file or asks_for_channel)
+def _enrich_action_params_with_context(
+    *,
+    deps: NodeDeps,
+    state: WorkflowState,
+    action: str,
+    system: str,
+    params: dict,
+) -> dict:
+    base = dict(params)
+    if system == "telegram" and action == "telegram_send_message":
+        base = _sanitize_telegram_chat_params(state, base)
+    sys_prompt = (
+        "You enrich tool action parameters for an orchestrator. "
+        "Return JSON object only with params keys/values. Do not include explanations."
+    )
+    user_prompt = json.dumps(
+        {
+            "system": system,
+            "action": action,
+            "current_request": _current_request_text(state),
+            "rag_context_text": state.get("rag_compiled_context", ""),
+            "existing_params": base,
+        },
+        ensure_ascii=False,
+    )
+    try:
+        raw = deps.llm.complete_json(system_prompt=sys_prompt, user_prompt=user_prompt)
+        if isinstance(raw, dict):
+            merged = dict(base)
+            for k, v in raw.items():
+                merged[k] = v
+            if system == "telegram" and action == "telegram_send_message":
+                merged = _sanitize_telegram_chat_params(state, merged)
+            return merged
+    except Exception:
+        return base
+    return base
 
 
-def _normalize_answer_to_intent(answer: str, state: WorkflowState) -> str:
-    req = _current_request_text(state).lower()
-    asks_jira = "jira" in req
-    asks_telegram = "telegram" in req
-    asks_file = any(p in req for p in ("in the file", "from the file", "uploaded file", "this file", "file related"))
-    asks_accuracy = "accuracy" in req
+def _compile_rag_hits(hits: list[dict]) -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for hit in hits[:50]:
+        payload = hit.get("payload", {}) if isinstance(hit, dict) else {}
+        text = payload.get("text") if isinstance(payload, dict) else None
+        if not isinstance(text, str):
+            continue
+        clean = text.strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        lines.append(clean)
+        if len(lines) >= 20:
+            break
+    return "\n".join(lines)
 
-    lower_ans = answer.lower()
-    if _looks_like_missing_input_prompt(answer, state):
-        if asks_file and asks_telegram and not asks_jira:
-            return "I will extract accuracy-related issues from the uploaded file and send the summary to Telegram."
-        if asks_file and asks_telegram and asks_jira:
-            return (
-                "I will extract accuracy-related issues from the uploaded file, send the summary to Telegram, "
-                "and create Jira ticket(s) as requested."
-            )
 
-    # Prevent accidental Jira-hallucinated commitments when user did not ask Jira.
-    if not asks_jira and ("jira" in lower_ans or "ticket" in lower_ans):
-        if asks_file and asks_telegram:
-            if asks_accuracy:
-                return "I will extract all accuracy-related issues from the uploaded file and send them to Telegram."
-            return "I will extract the requested issues from the uploaded file and send them to Telegram."
-        return "I will process your request and return the result."
-
-    return answer
+def _build_final_answer(state: WorkflowState) -> str:
+    request = _current_request_text(state)
+    results = state.get("action_results", [])
+    success = [r for r in results if isinstance(r, dict) and r.get("status") == "success"]
+    failed = [r for r in results if isinstance(r, dict) and r.get("status") == "failed"]
+    skipped = [r for r in results if isinstance(r, dict) and r.get("status") == "skipped"]
+    rag = state.get("rag_context", {})
+    hit_count = len(rag.get("hits", [])) if isinstance(rag, dict) and isinstance(rag.get("hits"), list) else 0
+    return (
+        f"Processed request: {request}\n"
+        f"RAG hits: {hit_count}\n"
+        f"Actions: {len(success)} succeeded, {len(failed)} failed, {len(skipped)} skipped."
+    )
 
 
 def _prepare_action_params(
@@ -406,6 +439,8 @@ def _prepare_action_params(
     action_data: dict[str, dict],
 ) -> tuple[dict, str | None]:
     out = dict(params)
+    if system == "telegram" and action == "telegram_send_message":
+        out = _sanitize_telegram_chat_params(state, out)
     if system == "jira" and action == "jira_create_issue":
         return _prepare_jira_create_issue_params(state, out)
     if system == "jira" and action == "jira_assign_issue":
@@ -488,3 +523,15 @@ def _to_jira_adf(text: str) -> dict:
             }
         ],
     }
+
+
+def _sanitize_telegram_chat_params(state: WorkflowState, params: dict) -> dict:
+    out = dict(params)
+    trusted = state.get("telegram_chat_id")
+    if isinstance(trusted, str) and trusted.strip():
+        out["chat_id"] = trusted.strip()
+        return out
+    # Never trust model/planner-generated chat_id by default. Let Telegram client
+    # fall back to TELEGRAM_DEFAULT_CHAT_ID from environment configuration.
+    out.pop("chat_id", None)
+    return out

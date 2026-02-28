@@ -200,6 +200,11 @@ def _normalize_params(system: str, action: str, params: dict[str, Any]) -> dict[
     out = dict(params)
     if system == "jira" and action == "jira_search_issues":
         return _normalize_jira_search_params(out)
+    if system == "telegram" and action == "telegram_send_message":
+        text = out.get("text")
+        if not isinstance(text, str) or not text.strip():
+            out["text"] = "Jira summary is ready."
+        return out
     return out
 
 

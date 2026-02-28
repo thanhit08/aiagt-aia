@@ -15,11 +15,11 @@ from aia.services.factory import build_clients
 from aia.workflow.nodes import (
     NodeDeps,
     aggregate_node,
-    answer_node,
-    enrichment_node,
     execute_actions_node,
     intake_node,
+    rag_check_node,
     rag_context_node,
+    rag_query_enrichment_node,
     route_node,
 )
 from aia.workflow.graph import build_graph
@@ -70,6 +70,7 @@ class IntakeJsonRequest(BaseModel):
     request_id: str | None = None
     conversation_id: str | None = None
     file_id: str | None = None
+    telegram_chat_id: str | None = None
 
 
 @app.post("/qa-intake")
@@ -120,6 +121,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         "raw_instruction": payload.instruction,
         "user_id": payload.user_id,
         "file_id": payload.file_id,
+        "telegram_chat_id": payload.telegram_chat_id,
     }
 
     conversation_store.append_message(
@@ -166,7 +168,8 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         summarize_fn=lambda current, old: _summarize_history(current, old),
     )
 
-    cache_store.set_json(cache_key, response, ttl_seconds=settings.redis_response_ttl_seconds)
+    if _is_cacheable_response(response):
+        cache_store.set_json(cache_key, response, ttl_seconds=settings.redis_response_ttl_seconds)
     existing = cache_store.get_json(_request_status_key(request_id)) or {}
     _set_request_status(
         request_id=request_id,
@@ -328,12 +331,23 @@ def _response_cache_key(user_id: str, instruction: str, file_id: str | None) -> 
     return f"resp:{digest}"
 
 
+def _is_cacheable_response(response: dict) -> bool:
+    if not isinstance(response, dict):
+        return False
+    if response.get("errors"):
+        return False
+    action_results = response.get("action_results", [])
+    if not isinstance(action_results, list):
+        return True
+    return not any(isinstance(item, dict) and item.get("status") == "failed" for item in action_results)
+
+
 def _request_status_key(request_id: str) -> str:
     return f"request_status:{request_id}"
 
 
 def _workflow_steps() -> list[str]:
-    return ["intake", "enrichment", "rag", "answer", "route", "execute_actions", "aggregate", "done"]
+    return ["intake", "rag_check", "rag_query_enrichment", "rag", "route", "execute_actions", "aggregate", "done"]
 
 
 def _set_request_status(
@@ -372,17 +386,80 @@ def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> 
     steps = _workflow_steps()
     current: dict = dict(state)
     step_details: list[dict] = []
-    pipeline = [
-        ("intake", lambda s: intake_node(s)),
-        ("enrichment", lambda s: enrichment_node(s, node_deps)),
-        ("rag", lambda s: rag_context_node(s, node_deps)),
-        ("answer", lambda s: answer_node(s, node_deps)),
-        ("route", lambda s: route_node(s, node_deps)),
-        ("execute_actions", lambda s: execute_actions_node(s, node_deps)),
-        ("aggregate", lambda s: aggregate_node(s)),
-    ]
+    pipeline = [("intake", lambda s: intake_node(s)), ("rag_check", lambda s: rag_check_node(s))]
     try:
         for idx, (node_name, fn) in enumerate(pipeline, start=1):
+            step_input = _step_snapshot(current)
+            detail = {
+                "node": node_name,
+                "state": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "input": step_input,
+            }
+            step_details.append(detail)
+            _set_request_status(
+                request_id=request_id,
+                state="running",
+                current_node=node_name,
+                step_index=idx,
+                total_steps=len(steps),
+                user_id=user_id,
+                step_details=step_details,
+            )
+            update = fn(current)
+            if isinstance(update, dict):
+                current.update(update)
+            detail["state"] = "completed"
+            detail["finished_at"] = datetime.now(timezone.utc).isoformat()
+            detail["output"] = _step_snapshot(update if isinstance(update, dict) else {"value": str(update)})
+            _set_request_status(
+                request_id=request_id,
+                state="running",
+                current_node=node_name,
+                step_index=idx,
+                total_steps=len(steps),
+                user_id=user_id,
+                step_details=step_details,
+            )
+
+        # Branch by rag_check result.
+        if current.get("rag_required"):
+            dynamic_pipeline = [
+                ("rag_query_enrichment", lambda s: rag_query_enrichment_node(s, node_deps)),
+                ("rag", lambda s: rag_context_node(s, node_deps)),
+                ("route", lambda s: route_node(s, node_deps)),
+                ("execute_actions", lambda s: execute_actions_node(s, node_deps)),
+                ("aggregate", lambda s: aggregate_node(s)),
+            ]
+        else:
+            # Mark RAG-only steps as skipped for UI clarity.
+            for skipped_name, skipped_idx in [("rag_query_enrichment", 3), ("rag", 4)]:
+                skipped_detail = {
+                    "node": skipped_name,
+                    "state": "skipped",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "input": _step_snapshot(current),
+                    "output": {"reason": "rag_required=false"},
+                }
+                step_details.append(skipped_detail)
+                _set_request_status(
+                    request_id=request_id,
+                    state="running",
+                    current_node=skipped_name,
+                    step_index=skipped_idx,
+                    total_steps=len(steps),
+                    user_id=user_id,
+                    step_details=step_details,
+                )
+            dynamic_pipeline = [
+                ("route", lambda s: route_node(s, node_deps)),
+                ("execute_actions", lambda s: execute_actions_node(s, node_deps)),
+                ("aggregate", lambda s: aggregate_node(s)),
+            ]
+
+        for node_name, fn in dynamic_pipeline:
+            idx = steps.index(node_name) + 1
             step_input = _step_snapshot(current)
             detail = {
                 "node": node_name,
@@ -439,6 +516,9 @@ def _step_snapshot(data: dict) -> dict:
         "request_id",
         "instruction",
         "raw_instruction",
+        "rag_required",
+        "rag_query_spec",
+        "rag_compiled_context",
         "enriched_task",
         "rag_context",
         "answer",

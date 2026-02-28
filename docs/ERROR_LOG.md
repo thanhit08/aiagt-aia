@@ -38,6 +38,57 @@ The LLM enrichment response did not match the strict `EnrichedTask` schema:
 ### Verification
 - Local compile checks passed for updated modules.
 
+## 2026-02-28 - Telegram `chat not found` after workflow refactor
+
+### Symptom
+- Action execution failed with:
+  - `telegram:telegram_send_message failed: http_400: Bad Request: chat not found ...`
+- User reported this flow worked before recent workflow/enrichment updates.
+
+### Root Cause
+- `chat_id` was being sourced from planner/LLM-generated action params in the route/enrichment pipeline.
+- That generated value could override the known-good default from `TELEGRAM_DEFAULT_CHAT_ID`.
+
+### Why This Happened
+- The previous protection only removed model-injected `chat_id` in one branch.
+- Route-produced params could still carry `chat_id`, and were treated as trusted.
+
+### Resolution
+- Hardened Telegram param sanitization in [src/aia/workflow/nodes.py](E:/2026/AIA/src/aia/workflow/nodes.py):
+  - treat `chat_id` as protected routing data
+  - drop planner/LLM `chat_id` by default
+  - allow explicit override only from trusted API input `telegram_chat_id`
+- Added optional `telegram_chat_id` in [src/aia/api/main.py](E:/2026/AIA/src/aia/api/main.py) and state wiring in [src/aia/workflow/state.py](E:/2026/AIA/src/aia/workflow/state.py).
+- Added regression tests in [tests/test_telegram_chat_id_sanitization.py](E:/2026/AIA/tests/test_telegram_chat_id_sanitization.py).
+
+### Prevention
+- Keep transport routing identifiers (`chat_id`) out of planner authority.
+- Only accept channel routing overrides from explicit user/API fields.
+
+### Verification
+- Unit tests cover both:
+  - default path ignores model/planner `chat_id`
+  - trusted request override sets `chat_id`
+
+## 2026-02-28 - Stale failed response returned from Redis cache
+
+### Symptom
+- User retried same request after fix but still received old failed payload.
+
+### Root Cause
+- `/qa-intake` cached all responses, including failed action executions.
+- Cache key is deterministic by `user_id + instruction + file_id`, so retries could return stale failures.
+
+### Why This Happened
+- Cache layer optimized latency but did not distinguish successful vs failed outcomes.
+
+### Resolution
+- Updated [src/aia/api/main.py](E:/2026/AIA/src/aia/api/main.py):
+  - only cache responses when `errors` is empty and no action has `status=failed`.
+
+### Prevention
+- Cache only stable successful outputs, or include failure-aware invalidation policy.
+
 ## 2026-02-27 - Jira still appears in action plan for file-to-Telegram intent
 
 ### Symptom
