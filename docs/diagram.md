@@ -161,6 +161,33 @@ flowchart TD
     M --> J
 ```
 
+## 5.1 Action Execution Sequence
+```mermaid
+sequenceDiagram
+    participant E as Executor
+    participant L as LLM (Param Enrichment)
+    participant J as Jira Client
+    participant T as Telegram Client
+
+    E->>E: read action_plans + depends_on
+    loop each ready layer
+      E->>E: pick ready actions
+      par action i
+        E->>L: enrich params(action i)
+        L-->>E: enriched params
+        E->>J: execute (if jira)
+        J-->>E: ActionResult
+      and action j
+        E->>L: enrich params(action j)
+        L-->>E: enriched params
+        E->>T: execute (if telegram)
+        T-->>E: ActionResult
+      end
+      E->>E: update dependency state
+    end
+    E->>E: sort results to original route order
+```
+
 ## 6. Parallel-Eligible vs Sequential Patterns
 ```mermaid
 flowchart LR

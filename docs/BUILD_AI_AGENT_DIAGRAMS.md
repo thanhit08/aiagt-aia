@@ -148,6 +148,34 @@ flowchart TD
   V --> W[Append errors + action_data]
 ```
 
+## 5.1) Action Execution Layer (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant ORCH as Orchestrator/Executor
+  participant LLM as Param Enrichment LLM
+  participant J as Jira Client
+  participant TG as Telegram Client
+
+  ORCH->>ORCH: load action_plans + dependency state
+  loop each dependency layer
+    ORCH->>ORCH: select ready actions
+    par ready action A
+      ORCH->>LLM: enrich params(action A)
+      LLM-->>ORCH: param patch A
+      ORCH->>J: execute jira action (if system=jira)
+      J-->>ORCH: ActionResult A
+    and ready action B
+      ORCH->>LLM: enrich params(action B)
+      LLM-->>ORCH: param patch B
+      ORCH->>TG: execute telegram action (if system=telegram)
+      TG-->>ORCH: ActionResult B
+    end
+    ORCH->>ORCH: update action status/data + dependency graph
+  end
+  ORCH->>ORCH: reorder results by route index
+```
+
 ## 6) RAG Retrieval Algorithm (file-scoped)
 
 ```mermaid
