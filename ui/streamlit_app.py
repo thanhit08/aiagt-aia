@@ -6,7 +6,7 @@ import httpx
 import streamlit as st
 
 
-WORKFLOW_NODES = ["intake", "enrichment", "rag", "answer", "route", "execute_actions", "aggregate", "done"]
+WORKFLOW_NODES = ["intake", "rag_check", "rag_query_enrichment", "rag", "route", "execute_actions", "aggregate", "done"]
 
 
 def _post_qa(base_url: str, payload: dict) -> httpx.Response:
@@ -22,9 +22,9 @@ digraph AIA {
   node [shape=box, style="rounded,filled", color="#1f2937", fillcolor="#f8fafc"];
   user [label="User Request"];
   intake [label="Intake"];
-  enrich [label="Enrichment"];
-  rag [label="RAG (Optional)"];
-  answer [label="Answer"];
+  ragcheck [label="RAG Check"];
+  ragenrich [label="RAG Query Enrichment"];
+  rag [label="RAG Retrieve + Clean"];
   route [label="Route Plan"];
   exec [label="Execute Actions Dispatcher"];
   fanout [label="Parallel Actions", shape=diamond, fillcolor="#eef2ff"];
@@ -34,7 +34,11 @@ digraph AIA {
   aggregate [label="Aggregate"];
   done [label="Done"];
 
-  user -> intake -> enrich -> rag -> answer -> route -> exec -> fanout;
+  user -> intake -> ragcheck;
+  ragcheck -> route [label="no file_id"];
+  ragcheck -> ragenrich [label="has file_id"];
+  ragenrich -> rag -> route;
+  route -> exec -> fanout;
   fanout -> jira;
   fanout -> telegram;
   jira -> join;
