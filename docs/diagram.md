@@ -112,3 +112,23 @@ flowchart TD
     E -- yes --> G[Run each layer sequentially\\nRun actions within layer in parallel]
     G --> H[Merge results in original plan order]
 ```
+
+## 8. Enrichment Flows
+### 8.1 RAG Query Enrichment
+```mermaid
+flowchart TD
+    R1[raw_instruction + file_id] --> R2[LLM rag-query-builder]
+    R2 --> R3[Normalize query spec]
+    R3 --> R4[Ensure uploaded_files collection included]
+    R4 --> R5[rag_query_spec ready]
+```
+
+### 8.2 Action Parameter Enrichment
+```mermaid
+flowchart TD
+    P1[action + params] --> P2[LLM param enrichment with request + rag context]
+    P2 --> P3[merge params]
+    P3 --> P4[sanitize protected fields]
+    P4 --> P5[action-specific precheck]
+    P5 --> P6[execute tool]
+```

@@ -119,6 +119,29 @@ flowchart TD
   R6 --> R7[Pass compiled context to planner + action enrichment]
 ```
 
+## 6.1) Enrichment Diagram - RAG Query Enrichment
+
+```mermaid
+flowchart TD
+  E1[Current User Request + file_id] --> E2[Prompt: rag-query-builder.system]
+  E2 --> E3[LLM returns query spec JSON]
+  E3 --> E4[Normalize query spec\\ncollections/query_text/top_k/min_score]
+  E4 --> E5[Force include uploaded_files collection]
+  E5 --> E6[Output rag_query_spec]
+```
+
+## 6.2) Enrichment Diagram - Action Parameter Enrichment
+
+```mermaid
+flowchart TD
+  A1[action from route_plan] --> A2[Build enrichment prompt\\n(request + rag_compiled_context + existing params)]
+  A2 --> A3[LLM returns param patch JSON]
+  A3 --> A4[Merge with existing params]
+  A4 --> A5[Sanitize protected fields\\n(e.g., telegram chat_id)]
+  A5 --> A6[Precheck by action type\\n(jira create/assign requirements)]
+  A6 --> A7[Ready for tool execution]
+```
+
 ## 7) Routing Policy Rules (intent guardrails)
 
 ```mermaid
