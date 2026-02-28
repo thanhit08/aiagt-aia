@@ -152,6 +152,20 @@ flowchart TD
 ```
 
 ## 8. Enrichment Flows
+### 8.0 Retrieval Sequence
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant L as LLM (RAG Query Enrichment)
+    participant Q as Qdrant
+
+    O->>L: request rag query spec (instruction + file_id)
+    L-->>O: rag_query_spec
+    O->>Q: search with file_id filter
+    Q-->>O: retrieval hits
+    O->>O: compile rag context
+```
+
 ### 8.1 RAG Query Enrichment
 ```mermaid
 flowchart TD

@@ -160,6 +160,22 @@ flowchart TD
   R6 --> R7[Pass compiled context to planner + action enrichment]
 ```
 
+## 6.0) Retrieval (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant ORCH as Workflow Orchestrator
+  participant LLM as RAG Query Enricher
+  participant Q as Qdrant
+
+  ORCH->>LLM: build rag_query_spec(instruction, file_id)
+  LLM-->>ORCH: query_text, collections, top_k, min_score
+  ORCH->>Q: search(collections, query_text, top_k, min_score, file_id filter)
+  Q-->>ORCH: hits
+  ORCH->>ORCH: compile unique retrieval context
+  ORCH-->>ORCH: rag_compiled_context ready
+```
+
 ## 6.1) Enrichment Diagram - RAG Query Enrichment
 
 ```mermaid
