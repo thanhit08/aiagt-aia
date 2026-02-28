@@ -66,3 +66,49 @@ flowchart LR
     S1 --> Redis
     S2 --> Redis
 ```
+
+## 5. Action Execution Algorithm (Sequential vs Parallel)
+```mermaid
+flowchart TD
+    A[route_plan.action_plans] --> B{ACCEPT_PARALLEL or accept_parallel?}
+    B -- no --> C[Sequential loop]
+    B -- yes --> D[Dependency-layer parallel executor]
+    C --> E[Run action i]
+    E --> F{depends_on satisfied?}
+    F -- no --> G[mark skipped]
+    F -- yes --> H[execute action]
+    H --> I[store ActionResult]
+    I --> E
+    D --> J[Find ready actions\\nall depends_on succeeded]
+    J --> K[Run ready set concurrently]
+    K --> L[Collect ActionResult]
+    L --> M[Update dependency state]
+    M --> J
+```
+
+## 6. Parallel-Eligible vs Sequential Patterns
+```mermaid
+flowchart LR
+    subgraph ParallelEligible
+      P1[jira_create_issue]
+      P2[telegram_send_message]
+      P1 --- P2
+    end
+
+    subgraph SequentialRequired
+      S1[jira_search_issues] --> S2[telegram_send_message summary]
+      S3[jira_create_issue] --> S4[jira_assign_issue]
+    end
+```
+
+## 7. Automatic Grouping by Dependency Layers
+```mermaid
+flowchart TD
+    A[route_plan.action_plans] --> B[Build dependency graph]
+    B --> C[Compute layer 0: no deps]
+    C --> D[Compute next layers: deps satisfied by earlier layers]
+    D --> E{parallel mode enabled?}
+    E -- no --> F[Run all actions sequentially by plan order]
+    E -- yes --> G[Run each layer sequentially\\nRun actions within layer in parallel]
+    G --> H[Merge results in original plan order]
+```

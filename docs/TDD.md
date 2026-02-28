@@ -3,7 +3,7 @@
 ## 1. Overview
 AIA is a FastAPI service orchestrating:
 - request enrichment + optional retrieval
-- sequential action execution (Jira/Telegram; Slack fallback)
+- dependency-aware action execution (sequential or parallel based on config + dependencies)
 - Redis cache/rate-limit/file-status tracking
 - MongoDB conversation + request log persistence
 
@@ -17,7 +17,7 @@ AIA is a FastAPI service orchestrating:
    - response cache lookup via Redis
    - load conversation summary + recent messages from Mongo
    - merge context into instruction
-   - run graph (`intake -> enrichment -> rag(optional) -> answer -> route -> execute_actions -> aggregate`)
+   - run graph (`intake -> rag_check -> rag_query_enrichment(optional) -> rag(optional) -> route -> execute_actions -> aggregate`)
    - persist user+assistant messages and request/response log to Mongo
    - compact history using rolling summary when threshold exceeded
 3. `GET /conversation/{conversation_id}`:
@@ -84,6 +84,46 @@ Single strategy: **rolling summary + recent window**
 - Mongo unavailable: in-memory conversation fallback
 - Slack action requested: deterministic failed action result with Telegram suggestion
 
-## 9. Known Behavioral Constraints
-- Action execution is currently sequential in `execute_actions_node` (no DAG parallel execution yet)
+## 9. Action Execution Algorithm (Implemented)
+### 9.1 Mode selection
+- `ACCEPT_PARALLEL=false` (default): sequential execution.
+- `ACCEPT_PARALLEL=true`: parallel execution for dependency-independent actions.
+- Request can override via `/qa-intake` payload field `accept_parallel`.
+
+### 9.2 Dependency rules
+- `depends_on` is authoritative.
+- An action runs only when all dependencies succeeded.
+- If a dependency failed/skipped, dependent action is marked `skipped`.
+- Action results are returned in original route plan order for deterministic UI/testing.
+
+### 9.3 Automatic grouping strategy (route/runtime)
+- Build dependency layers from action plan graph:
+  - layer N contains actions whose dependencies are all in layers `< N`
+- Execution semantics:
+  - run all actions in the same layer in parallel (when parallel mode enabled)
+  - run layers sequentially (layer 0 -> layer 1 -> layer 2 ...)
+- This yields automatic split between:
+  - **parallel group**: independent actions in same layer
+  - **sequential group**: dependency chain across layers
+- If planner over-specifies dependencies, they are honored (safety first).
+- If unresolved/cyclic dependency remains, affected actions are marked `skipped`.
+
+### 9.4 Parallel vs sequential patterns
+- Parallel-eligible (independent actions):
+  - `jira_create_issue` + `telegram_send_message` with no cross-dependency
+  - `jira_search_issues` + `telegram_send_message` with no cross-dependency
+- Must stay sequential (data dependency):
+  - `jira_search_issues -> telegram_send_message` when Telegram content depends on Jira search output
+  - `jira_create_issue -> jira_assign_issue` (needs created `issue_key`)
+  - any chain declared via `depends_on`
+
+### 9.5 Practical examples
+- Example A (parallel):
+  - User asks: "Create Jira ticket and notify Telegram"
+  - Plan: two actions, both `depends_on=[]` -> run concurrently.
+- Example B (sequential):
+  - User asks: "Search Jira issues assigned to me, then send summary to Telegram"
+  - Plan: `telegram_send_message.depends_on=['jira_search_issues']` -> run in order.
+
+## 10. Known Behavioral Constraints
 - Upload pipeline states are updated synchronously inside request lifecycle

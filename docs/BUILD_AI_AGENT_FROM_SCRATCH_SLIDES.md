@@ -1,4 +1,4 @@
-# Build an AI Agent From Scratch in Python
+ï»¿# Build an AI Agent From Scratch in Python
 ## Beginner Tutorial + Real-World Bug Fix Journey
 
 **Project:** AIA (Actionable Intelligence Agent)  
@@ -80,7 +80,7 @@
 
 ## 8. Critical Bug #1 - Enrichment Validation 500
 **Symptom:** `/qa-intake` returned 500 from Pydantic validation.  
-**Root cause:** LLM output didn’t match strict schema (wrong enum values, missing required fields, wrong types).  
+**Root cause:** LLM output didnâ€™t match strict schema (wrong enum values, missing required fields, wrong types).  
 **Fix:** normalization layer before validation + safe fallback object.
 
 ---
@@ -94,7 +94,7 @@
 
 ## 10. Critical Bug #3 - Wrong Route Plan (Unwanted Jira Search)
 **Symptom:** `jira_search_issues` was added even when user asked file->Telegram + create Jira tickets.  
-**Root cause:** intent parser too narrow (missed phrase variants like “create Jira tickets”).  
+**Root cause:** intent parser too narrow (missed phrase variants like â€œcreate Jira ticketsâ€).  
 **Fix:** stronger intent rules + explicit policy: search Jira only when asked.
 
 ---
@@ -160,7 +160,7 @@
 - Treat LLM output as untrusted input.
 - Retrieval and action planning should be separate steps.
 - Real integrations fail in many ways; build fallback logic.
-- Good docs + tests are part of “agent reliability.”
+- Good docs + tests are part of â€œagent reliability.â€
 
 ---
 
@@ -172,6 +172,39 @@
 
 ---
 
-## 20. Final Message
+## 20. Deep Dive - Concurrency/Parallelism
+- Add `ACCEPT_PARALLEL` (env) and `accept_parallel` (request override).
+- Use dependency-aware execution:
+  - automatically group actions by dependency layers
+  - run parallel inside each layer
+  - run sequential across layers
+- Keep deterministic output ordering by route plan index.
+
+**Parallel example:** `jira_create_issue` + `telegram_send_message` (no data dependency)  
+**Sequential example:** `jira_search_issues -> telegram_send_message` (summary depends on search)
+
+---
+
+## 21. Deep Dive - Why This Improves Performance
+- Lower end-to-end latency for multi-tool requests.
+- Better user experience in UI (visible concurrent progress).
+- No loss of safety because dependency chains are still enforced.
+- Easy comparison in Streamlit with runtime timers.
+
+---
+
+## 22. Deep Dive - Automatic Switch Strategy
+1. Route produces `action_plans` with `depends_on`.
+2. Executor builds dependency layers from the plan.
+3. If parallel mode is enabled:
+   - execute each layer in parallel
+   - move to next layer only after completion
+4. If parallel mode is disabled:
+   - execute in sequential order (compatibility mode)
+5. Always return results in original route order.
+
+---
+
+## 23. Final Message
 A production-ready AI agent is not just prompts.  
 It is **workflow design + validation + fallback + testing + operations discipline**.

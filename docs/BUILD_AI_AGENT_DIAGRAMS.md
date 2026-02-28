@@ -282,3 +282,77 @@ flowchart LR
   API --> JIRA[Jira Cloud]
   API --> TG[Telegram API]
 ```
+
+## 15) Concurrency Mode Switch (Sequential vs Parallel)
+
+```mermaid
+flowchart TD
+  A[execute_actions node] --> B{accept_parallel override?}
+  B -- yes --> C[Use request value]
+  B -- no --> D[Read ACCEPT_PARALLEL env]
+  C --> E{parallel enabled?}
+  D --> E
+  E -- no --> F[Sequential executor]
+  E -- yes --> G[Dependency-aware parallel executor]
+```
+
+## 16) Dependency-Layer Parallel Executor
+
+```mermaid
+flowchart TD
+  S1[Pending actions] --> S2[Select ready set\\nall depends_on satisfied]
+  S2 --> S3{ready set exists?}
+  S3 -- yes --> S4[Execute ready actions concurrently]
+  S4 --> S5[Store ActionResult + update statuses]
+  S5 --> S1
+  S3 -- no --> S6{pending actions remain?}
+  S6 -- no --> S7[Finish]
+  S6 -- yes --> S8[Mark unresolved dependency actions skipped]
+```
+
+## 17) Parallel-Eligible vs Sequential Scenarios
+
+```mermaid
+flowchart LR
+  subgraph ParallelEligible
+    P1[jira_create_issue]
+    P2[telegram_send_message]
+    P1 --- P2
+    P3[depends_on=[]]
+  end
+
+  subgraph SequentialRequired
+    S1[jira_search_issues] --> S2[telegram_send_message summary]
+    S3[jira_create_issue] --> S4[jira_assign_issue]
+  end
+```
+
+## 18) Automatic Grouping Strategy (Route -> Runtime)
+
+```mermaid
+sequenceDiagram
+  participant RT as Route Planner
+  participant EX as Executor
+
+  RT->>EX: action_plans + depends_on
+  EX->>EX: Build dependency graph
+  EX->>EX: Compute execution layers
+  alt parallel enabled
+    EX->>EX: Run actions in same layer concurrently
+    EX->>EX: Run next layer after prior layer completes
+  else sequential mode
+    EX->>EX: Run by route order
+  end
+  EX->>EX: Reorder outputs to original action index
+```
+
+## 19) Timing and UX Observability
+
+```mermaid
+flowchart TD
+  U1[Streamlit request start] --> U2[Poll /qa-intake/{request_id}/status]
+  U2 --> U3[Render current node state]
+  U2 --> U4[Compute total runtime]
+  U2 --> U5[Compute per-step durations\\nstarted_at -> finished_at]
+  U5 --> U6[Show Detail per step]
+```

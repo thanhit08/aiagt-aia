@@ -162,7 +162,49 @@ sequenceDiagram
 
 ---
 
-## 13. Reliability Patterns
+## 13. Deep Dive - Concurrency/Parallelism Architecture
+- Execution mode:
+  - `ACCEPT_PARALLEL=false`: sequential mode
+  - `ACCEPT_PARALLEL=true`: dependency-aware parallel mode
+  - per-request override: `accept_parallel`
+- Parallel rule:
+  - actions in the same satisfied dependency layer run concurrently
+- Sequential rule:
+  - layers execute in order; dependent actions wait for parent layer completion
+- Determinism:
+  - keep final `action_results` in original route order
+
+---
+
+## 14. Deep Dive - Dependency DAG Execution Pattern
+```mermaid
+flowchart TD
+  A[route_plan.action_plans] --> B[Build dependency state]
+  B --> C[Pick ready actions\\nall depends_on succeeded]
+  C --> D{ready set empty?}
+  D -- no --> E[Run ready set concurrently]
+  E --> F[Collect results + update status]
+  F --> C
+  D -- yes --> G{pending remains?}
+  G -- no --> H[Done]
+  G -- yes --> I[Mark unresolved as skipped]
+```
+
+---
+
+## 15. Deep Dive - Automatic Grouping Strategy
+- Route-time + runtime cooperation:
+  - route declares dependencies (`depends_on`)
+  - runtime computes dependency layers automatically
+- Grouping output:
+  - `parallel groups`: actions in same layer
+  - `sequential groups`: layer boundaries with dependencies
+- Benefit:
+  - PM/PDM get lower latency without sacrificing correctness.
+
+---
+
+## 16. Reliability Patterns
 - graceful degradation when services fail
 - per-integration timeout budgets
 - circuit breakers on unstable providers
@@ -171,7 +213,7 @@ sequenceDiagram
 
 ---
 
-## 14. Observability & Operations
+## 17. Observability & Operations
 Track at least:
 - p50/p95 latency per node
 - tool success/failure rate
@@ -181,7 +223,16 @@ Track at least:
 
 ---
 
-## 15. Security Architecture
+## 18. Concurrency KPIs (What PM/PDM Should Track)
+- End-to-end latency delta: sequential vs parallel mode
+- % requests with parallel-eligible action sets
+- % requests blocked by dependency chains
+- Failure propagation rate (parent failed -> child skipped)
+- User-perceived completion time in UI
+
+---
+
+## 19. Security Architecture
 - OAuth/API key management via secret manager
 - RBAC for actions/tools
 - request validation + schema constraints
@@ -190,7 +241,7 @@ Track at least:
 
 ---
 
-## 16. CI/CD and Environment Strategy
+## 20. CI/CD and Environment Strategy
 - schema and contract tests in CI
 - integration smoke tests against staging services
 - feature flags for new route/tool behaviors
@@ -198,7 +249,7 @@ Track at least:
 
 ---
 
-## 17. Failure Case Examples (Real)
+## 21. Failure Case Examples (Real)
 - schema mismatch from LLM output -> normalize before validate
 - unsupported action names -> strict catalog + alias map
 - provider endpoint drift -> multi-path fallback
@@ -206,7 +257,7 @@ Track at least:
 
 ---
 
-## 18. Performance and Cost Controls
+## 22. Performance and Cost Controls
 - prompt/context size budgets
 - response caching policy
 - retrieval candidate limits
@@ -215,7 +266,7 @@ Track at least:
 
 ---
 
-## 19. Maturity Roadmap
+## 23. Maturity Roadmap
 1. **MVP:** synchronous orchestration + basic tools  
 2. **Production v1:** observability + policy + retries + memory compaction  
 3. **Production v2:** async jobs + approvals + multi-tenant isolation  
@@ -223,7 +274,7 @@ Track at least:
 
 ---
 
-## 20. Key Takeaways
+## 24. Key Takeaways
 - Production AI agents are architecture problems, not only prompt problems.
 - Core success factors:
   - explicit orchestration
