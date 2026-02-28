@@ -284,6 +284,47 @@ flowchart LR
   U[Upload flow] --> Q10[Write file status\nupload_status:<file_id>]
 ```
 
+## 9.1) Redis (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant API as API
+  participant R as Redis
+
+  API->>R: INCR rate:<user_id> with TTL
+  API->>R: GET resp cache key
+  alt cache miss
+    API->>R: SET request_status:<request_id> (running)
+    API->>R: SET request_status:<request_id> (per-step updates)
+    API->>R: SET resp cache key (success only)
+  else cache hit
+    API-->>API: return cached response
+  end
+
+  Note over API,R: Upload flow also writes file_meta:<file_id> and file_status:<file_id> lifecycle
+```
+
+## 9.2) MongoDB Memory (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant API as API
+  participant M as MongoDB
+  participant LLM as LLM
+
+  API->>M: get_context(conversation_id)
+  M-->>API: summary + recent messages
+  API->>M: append user message
+  API->>M: append assistant message + tools_used
+  API->>M: log request/response
+  API->>M: maybe_compact history
+  alt over message threshold
+    API->>LLM: summarize older messages
+    LLM-->>API: compact summary
+    API->>M: persist new summary + trimmed messages
+  end
+```
+
 ## 10) Telegram Safety Logic
 
 ```mermaid

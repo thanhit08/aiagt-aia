@@ -105,6 +105,43 @@ flowchart LR
     S2 --> Redis
 ```
 
+## 4.1 Redis Sequence (Rate Limit, Cache, Status)
+```mermaid
+sequenceDiagram
+    participant A as API
+    participant R as Redis
+
+    A->>R: rate limit increment with TTL
+    A->>R: response cache lookup
+    alt cache miss
+      A->>R: set request_status running
+      A->>R: update request_status per node
+      A->>R: cache final response (success only)
+    else cache hit
+      R-->>A: cached response
+    end
+```
+
+## 4.2 MongoDB Sequence (Conversation Memory)
+```mermaid
+sequenceDiagram
+    participant A as API
+    participant M as MongoDB
+    participant L as LLM
+
+    A->>M: load conversation context
+    M-->>A: summary + recent messages
+    A->>M: append user message
+    A->>M: append assistant message + tools used
+    A->>M: log request/response
+    A->>M: maybe compact history
+    alt threshold exceeded
+      A->>L: summarize older history
+      L-->>A: summary text
+      A->>M: store compacted summary
+    end
+```
+
 ## 5. Action Execution Algorithm (Sequential vs Parallel)
 ```mermaid
 flowchart TD
