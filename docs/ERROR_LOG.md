@@ -263,3 +263,55 @@ The LLM enrichment response did not match the strict `EnrichedTask` schema:
 
 ### Verification
 - Compile checks passed for updated node/test files.
+
+## 2026-02-27 - UI workflow stuck at intake then jumps to done
+
+### Symptom
+- Streamlit workflow visualization stayed on `intake` for most of request duration.
+- At completion, UI jumped directly to `done` with missing intermediate node updates.
+
+### Root Cause
+- Status updates relied on graph streaming behavior, which did not consistently emit per-node events in this runtime path.
+
+### Why This Happened
+- `graph.stream(..., stream_mode="updates")` event granularity depended on backend graph execution mode and wrappers.
+- UI polling was correct but backend status source was too coarse.
+
+### Resolution
+- Replaced status source with deterministic per-node execution path in [src/aia/api/main.py](E:/2026/AIA/src/aia/api/main.py).
+- API now executes workflow nodes sequentially for `/qa-intake` status tracking and writes status before each node.
+
+### Prevention
+- For UX-critical progress bars, use explicit state transitions controlled by application code.
+- Keep graph-level streaming as optional optimization, not sole progress source.
+
+### Verification
+- Local compile check passed for API/Streamlit.
+
+## 2026-02-27 - Route emitted non-catalog action `telegram_send_to_telegram`
+
+### Symptom
+- Execution failed with `Unsupported Telegram action: telegram_send_to_telegram`.
+
+### Root Cause
+- LLM generated non-canonical action name outside executor-supported fixed action set.
+
+### Why This Happened
+- Prompts requested valid actions conceptually but did not enforce explicit allow-list strongly enough.
+- Normalization layer did not include this alias initially.
+
+### Resolution
+- Enforced fixed action catalog normalization in [src/aia/workflow/enrichment.py](E:/2026/AIA/src/aia/workflow/enrichment.py):
+  - add alias `telegram_send_to_telegram` -> `telegram_send_message`
+  - force unknown actions to safe catalog defaults per system.
+- Strengthened prompt constraints in:
+  - [specs/v1/prompts/enrichment.system.md](E:/2026/AIA/specs/v1/prompts/enrichment.system.md)
+  - [specs/v1/prompts/orchestrator-routing.system.md](E:/2026/AIA/specs/v1/prompts/orchestrator-routing.system.md)
+- Added regression test in [tests/test_enrichment_normalization.py](E:/2026/AIA/tests/test_enrichment_normalization.py).
+
+### Prevention
+- Keep explicit allow-list in both prompt and runtime normalization.
+- Never execute action names not in fixed catalog.
+
+### Verification
+- Compile checks passed and regression test added.

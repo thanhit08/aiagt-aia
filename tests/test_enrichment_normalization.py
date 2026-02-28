@@ -102,6 +102,23 @@ def test_normalize_action_aliases_to_supported_catalog() -> None:
     assert model.action_plans[1].action == "telegram_send_message"
 
 
+def test_normalize_unknown_telegram_action_forces_fixed_catalog() -> None:
+    raw = {
+        "task_type": "tool_orchestration",
+        "requires_rag": False,
+        "output_tone": "neutral",
+        "action_plans": [
+            {
+                "system": "telegram",
+                "action": "telegram_send_to_telegram",
+                "params": {"text": "hello"},
+            }
+        ],
+    }
+    model = EnrichedTask.model_validate(normalize_enriched_task_raw(raw))
+    assert model.action_plans[0].action == "telegram_send_message"
+
+
 def test_normalize_jira_search_params_adds_bounds_and_defaults() -> None:
     raw = {
         "task_type": "tool_orchestration",

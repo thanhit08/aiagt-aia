@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -11,6 +12,16 @@ except Exception:  # pragma: no cover - optional dependency in constrained env
         return False
 
 from aia.services.factory import build_clients
+from aia.workflow.nodes import (
+    NodeDeps,
+    aggregate_node,
+    answer_node,
+    enrichment_node,
+    execute_actions_node,
+    intake_node,
+    rag_context_node,
+    route_node,
+)
 from aia.workflow.graph import build_graph
 
 load_dotenv()
@@ -25,6 +36,7 @@ graph = build_graph(
     jira=jira,
     telegram=telegram,
 )
+node_deps = NodeDeps(llm=llm, vector_store=vector_store, slack=slack, jira=jira, telegram=telegram)
 
 
 def _parse_upload(file: UploadFile, content: bytes) -> list[str]:
@@ -55,12 +67,14 @@ def get_conversation(conversation_id: str) -> dict:
 class IntakeJsonRequest(BaseModel):
     user_id: str = Field(min_length=1)
     instruction: str = Field(min_length=3)
+    request_id: str | None = None
     conversation_id: str | None = None
     file_id: str | None = None
 
 
 @app.post("/qa-intake")
 def qa_intake(payload: IntakeJsonRequest) -> dict:
+    request_id = payload.request_id or str(uuid4())
     rate_key = f"rate:{payload.user_id}"
     current = cache_store.increment_with_ttl(rate_key, ttl_seconds=60)
     if current > settings.redis_rate_limit_per_minute:
@@ -69,9 +83,25 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.file_id)
     cached = cache_store.get_json(cache_key)
     if cached is not None:
-        return {**cached, "cached": True}
+        _set_request_status(
+            request_id=request_id,
+            state="completed",
+            current_node="done",
+            step_index=len(_workflow_steps()),
+            total_steps=len(_workflow_steps()),
+            user_id=payload.user_id,
+        )
+        return {**cached, "request_id": request_id, "cached": True}
 
     conversation_id = payload.conversation_id or str(uuid4())
+    _set_request_status(
+        request_id=request_id,
+        state="running",
+        current_node="intake",
+        step_index=0,
+        total_steps=len(_workflow_steps()),
+        user_id=payload.user_id,
+    )
     context = conversation_store.get_context(
         conversation_id=conversation_id,
         recent_limit=settings.context_recent_messages,
@@ -82,7 +112,6 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         context.get("messages", []),
     )
 
-    request_id = str(uuid4())
     state = {
         "request_id": request_id,
         "instruction": merged_instruction,
@@ -99,7 +128,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         meta={"request_id": request_id},
     )
 
-    result = graph.invoke(state)
+    result = _invoke_graph_with_status(state, request_id=request_id, user_id=payload.user_id)
     response = result["final_response"]
     response["conversation_id"] = conversation_id
 
@@ -135,7 +164,23 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     )
 
     cache_store.set_json(cache_key, response, ttl_seconds=settings.redis_response_ttl_seconds)
+    _set_request_status(
+        request_id=request_id,
+        state="completed",
+        current_node="done",
+        step_index=len(_workflow_steps()),
+        total_steps=len(_workflow_steps()),
+        user_id=payload.user_id,
+    )
     return response
+
+
+@app.get("/qa-intake/{request_id}/status")
+def qa_intake_status(request_id: str) -> dict:
+    status = cache_store.get_json(_request_status_key(request_id))
+    if not status:
+        raise HTTPException(status_code=404, detail="Request status not found.")
+    return status
 
 
 def _register_upload_route() -> None:
@@ -276,6 +321,82 @@ def _response_cache_key(user_id: str, instruction: str, file_id: str | None) -> 
     )
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"resp:{digest}"
+
+
+def _request_status_key(request_id: str) -> str:
+    return f"request_status:{request_id}"
+
+
+def _workflow_steps() -> list[str]:
+    return ["intake", "enrichment", "rag", "answer", "route", "execute_actions", "aggregate", "done"]
+
+
+def _set_request_status(
+    *,
+    request_id: str,
+    state: str,
+    current_node: str,
+    step_index: int,
+    total_steps: int,
+    user_id: str,
+    error: str | None = None,
+) -> None:
+    payload = {
+        "request_id": request_id,
+        "state": state,
+        "current_node": current_node,
+        "step_index": step_index,
+        "total_steps": total_steps,
+        "steps": _workflow_steps(),
+        "user_id": user_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if error:
+        payload["error"] = error
+    cache_store.set_json(
+        _request_status_key(request_id),
+        payload,
+        ttl_seconds=settings.redis_response_ttl_seconds,
+    )
+
+
+def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> dict:
+    steps = _workflow_steps()
+    current: dict = dict(state)
+    pipeline = [
+        ("intake", lambda s: intake_node(s)),
+        ("enrichment", lambda s: enrichment_node(s, node_deps)),
+        ("rag", lambda s: rag_context_node(s, node_deps)),
+        ("answer", lambda s: answer_node(s, node_deps)),
+        ("route", lambda s: route_node(s, node_deps)),
+        ("execute_actions", lambda s: execute_actions_node(s, node_deps)),
+        ("aggregate", lambda s: aggregate_node(s)),
+    ]
+    try:
+        for idx, (node_name, fn) in enumerate(pipeline, start=1):
+            _set_request_status(
+                request_id=request_id,
+                state="running",
+                current_node=node_name,
+                step_index=idx,
+                total_steps=len(steps),
+                user_id=user_id,
+            )
+            update = fn(current)
+            if isinstance(update, dict):
+                current.update(update)
+        return current
+    except Exception as exc:
+        _set_request_status(
+            request_id=request_id,
+            state="failed",
+            current_node=node_name if "node_name" in locals() else "failed",
+            step_index=idx if "idx" in locals() else 0,
+            total_steps=len(steps),
+            user_id=user_id,
+            error=str(exc),
+        )
+        raise
 
 
 def _file_id_from_filename(filename: str) -> str:

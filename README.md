@@ -45,6 +45,7 @@ docker run -p 6333:6333 qdrant/qdrant
 - `GET /upload/{file_id}` (file metadata from Redis)
 - `GET /upload/{file_id}/status` (check ingest progress in Redis)
 - `POST /qa-intake` (JSON)
+- `GET /qa-intake/{request_id}/status` (workflow step progress for UI polling)
 
 ## curl test (JSON)
 ```bash
@@ -128,5 +129,6 @@ Features:
 - upload file
 - check upload status
 - check upload metadata
-- send `/qa-intake` with `conversation_id` and optional `file_id`
+- send `/qa-intake` with `conversation_id`, optional `file_id`, and `request_id`
+- visualize workflow progress node-by-node while request is running
 - inspect conversation

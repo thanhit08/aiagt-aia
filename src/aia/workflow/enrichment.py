@@ -52,8 +52,37 @@ _ACTION_ALIASES: dict[str, dict[str, str]] = {
     "telegram": {
         "send_message": "telegram_send_message",
         "send_summary": "telegram_send_message",
+        "telegram_send_to_telegram": "telegram_send_message",
         "post_message": "telegram_send_message",
         "get_updates": "telegram_get_updates",
+    },
+}
+_CANONICAL_ACTIONS: dict[str, set[str]] = {
+    "jira": {
+        "jira_search_issues",
+        "jira_get_issue",
+        "jira_create_issue",
+        "jira_update_issue",
+        "jira_transition_issue",
+        "jira_add_comment",
+        "jira_assign_issue",
+        "jira_link_issues",
+        "jira_bulk_update",
+    },
+    "slack": {
+        "slack_post_message",
+        "slack_update_message",
+        "slack_reply_in_thread",
+        "slack_search_messages",
+        "slack_get_channel_history",
+        "slack_create_channel",
+        "slack_archive_channel",
+        "slack_invite_users",
+        "slack_add_reaction",
+    },
+    "telegram": {
+        "telegram_send_message",
+        "telegram_get_updates",
     },
 }
 
@@ -127,7 +156,18 @@ def _normalize_action_name(system: str, value: Any) -> str | None:
         prefixed = f"telegram_{normalized}"
         normalized = aliases.get(normalized, prefixed)
 
-    return normalized
+    allowed = _CANONICAL_ACTIONS.get(system, set())
+    if normalized in allowed:
+        return normalized
+
+    # If still unknown, force a safe default from fixed catalog per system.
+    if system == "jira":
+        return "jira_search_issues"
+    if system == "telegram":
+        return "telegram_send_message"
+    if system == "slack":
+        return "slack_post_message"
+    return None
 
 
 def _normalize_jira_search_params(params: dict[str, Any]) -> dict[str, Any]:
