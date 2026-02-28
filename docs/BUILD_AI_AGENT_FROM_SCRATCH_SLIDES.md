@@ -78,101 +78,7 @@
 
 ---
 
-## 8. Critical Bug #1 - Enrichment Validation 500
-**Symptom:** `/qa-intake` returned 500 from Pydantic validation.  
-**Root cause:** LLM output didn’t match strict schema (wrong enum values, missing required fields, wrong types).  
-**Fix:** normalization layer before validation + safe fallback object.
-
----
-
-## 9. Critical Bug #2 - Unsupported Actions
-**Symptom:** actions like `telegram_send_to_telegram` failed.  
-**Root cause:** planner emitted non-canonical action names.  
-**Fix:** strict action catalog + aliases + runtime normalization.
-
----
-
-## 10. Critical Bug #3 - Wrong Route Plan (Unwanted Jira Search)
-**Symptom:** `jira_search_issues` was added even when user asked file->Telegram + create Jira tickets.  
-**Root cause:** intent parser too narrow (missed phrase variants like “create Jira tickets”).  
-**Fix:** stronger intent rules + explicit policy: search Jira only when asked.
-
----
-
-## 11. Critical Bug #4 - Telegram `chat not found`
-**Symptom:** Telegram sending failed after workflow refactor.  
-**Root cause:** model/planner-generated `chat_id` overrode trusted defaults.  
-**Fix:** protect routing params; only allow `chat_id` from trusted API input or env default.
-
----
-
-## 12. Critical Bug #5 - Jira Search Endpoint Incompatibility
-**Symptom:** tenant-specific failures (`/search` vs `/search/jql`).  
-**Root cause:** Jira Cloud API differences across tenants.  
-**Fix:** compatible fallback sequence (POST/GET on both endpoints).
-
----
-
-## 13. Critical Bug #6 - Jira Scope Migration (Project -> Space)
-**Symptom:** issue creation failed after Jira taxonomy change.  
-**Root cause:** payload/config assumed `project` only.  
-**Fix:**
-- `JIRA_SCOPE_MODE=auto|space|project`
-- prefer space keys, fallback to project keys
-- create-issue retry with toggled payload field (`space` <-> `project`)
-
----
-
-## 14. Critical Bug #7 - Stale Failed Responses
-**Symptom:** after a fix, user still got old failure response.  
-**Root cause:** failed responses were cached by Redis key.  
-**Fix:** cache only successful responses.
-
----
-
-## 15. Critical Bug #8 - Workflow UI Appeared Stuck
-**Symptom:** status stayed at intake then jumped to done.  
-**Root cause:** event-stream granularity mismatch.  
-**Fix:** deterministic step-by-step status updates from backend node execution.
-
----
-
-## 16. Engineering Practices We Applied
-- Normalize model output before schema validation.
-- Keep strict fixed action catalog.
-- Separate concerns per node.
-- Add regression tests for every production bug.
-- Log each error with: symptom -> root cause -> fix -> prevention.
-
----
-
-## 17. Minimal Local Run (Concept)
-1. Start infra (Redis, MongoDB, Qdrant, API).
-2. Upload file via `/upload`.
-3. Call `/qa-intake` with `file_id`.
-4. Poll `/qa-intake/{request_id}/status`.
-5. Verify tool results (Telegram/Jira).
-
----
-
-## 18. Beginner Takeaways
-- Start with a simple, observable workflow.
-- Treat LLM output as untrusted input.
-- Retrieval and action planning should be separate steps.
-- Real integrations fail in many ways; build fallback logic.
-- Good docs + tests are part of “agent reliability.”
-
----
-
-## 19. Next Steps (V2 Ideas)
-- Add approval gates for medium/high-risk actions.
-- Add per-tenant capability flags for Jira/Telegram variants.
-- Add richer observability dashboards.
-- Add load tests for concurrent requests.
-
----
-
-## 20. Deep Dive - Concurrency/Parallelism
+## 8. Deep Dive - Concurrency/Parallelism
 - Add `ACCEPT_PARALLEL` (env) and `accept_parallel` (request override).
 - Use dependency-aware execution:
   - automatically group actions by dependency layers
@@ -185,7 +91,7 @@
 
 ---
 
-## 21. Deep Dive - Why This Improves Performance
+## 9. Deep Dive - Why This Improves Performance
 - Lower end-to-end latency for multi-tool requests.
 - Better user experience in UI (visible concurrent progress).
 - No loss of safety because dependency chains are still enforced.
@@ -193,7 +99,7 @@
 
 ---
 
-## 22. Deep Dive - Automatic Switch Strategy
+## 10. Deep Dive - Automatic Switch Strategy
 1. Route produces `action_plans` with `depends_on`.
 2. Executor builds dependency layers from the plan.
 3. If parallel mode is enabled:
@@ -205,6 +111,41 @@
 
 ---
 
-## 23. Final Message
+## 11. Engineering Practices We Applied
+- Normalize model output before schema validation.
+- Keep strict fixed action catalog.
+- Separate concerns per node.
+- Add regression tests for every production bug.
+- Log each error with: symptom -> root cause -> fix -> prevention.
+
+---
+
+## 12. Minimal Local Run (Concept)
+1. Start infra (Redis, MongoDB, Qdrant, API).
+2. Upload file via `/upload`.
+3. Call `/qa-intake` with `file_id`.
+4. Poll `/qa-intake/{request_id}/status`.
+5. Verify tool results (Telegram/Jira).
+
+---
+
+## 13. Beginner Takeaways
+- Start with a simple, observable workflow.
+- Treat LLM output as untrusted input.
+- Retrieval and action planning should be separate steps.
+- Real integrations fail in many ways; build fallback logic.
+- Good docs + tests are part of “agent reliability.”
+
+---
+
+## 14. Next Steps (V2 Ideas)
+- Add approval gates for medium/high-risk actions.
+- Add per-tenant capability flags for Jira/Telegram variants.
+- Add richer observability dashboards.
+- Add load tests for concurrent requests.
+
+---
+
+## 15. Final Message
 A production-ready AI agent is not just prompts.  
 It is **workflow design + validation + fallback + testing + operations discipline**.
