@@ -131,4 +131,5 @@ Features:
 - check upload metadata
 - send `/qa-intake` with `conversation_id`, optional `file_id`, and `request_id`
 - visualize workflow progress node-by-node while request is running
+- click `Detail` on each workflow step to inspect step input/output payloads
 - inspect conversation

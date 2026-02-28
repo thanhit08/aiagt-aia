@@ -83,6 +83,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     cache_key = _response_cache_key(payload.user_id, payload.instruction, payload.file_id)
     cached = cache_store.get_json(cache_key)
     if cached is not None:
+        existing = cache_store.get_json(_request_status_key(request_id)) or {}
         _set_request_status(
             request_id=request_id,
             state="completed",
@@ -90,6 +91,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
             step_index=len(_workflow_steps()),
             total_steps=len(_workflow_steps()),
             user_id=payload.user_id,
+            step_details=existing.get("step_details"),
         )
         return {**cached, "request_id": request_id, "cached": True}
 
@@ -164,6 +166,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
     )
 
     cache_store.set_json(cache_key, response, ttl_seconds=settings.redis_response_ttl_seconds)
+    existing = cache_store.get_json(_request_status_key(request_id)) or {}
     _set_request_status(
         request_id=request_id,
         state="completed",
@@ -171,6 +174,7 @@ def qa_intake(payload: IntakeJsonRequest) -> dict:
         step_index=len(_workflow_steps()),
         total_steps=len(_workflow_steps()),
         user_id=payload.user_id,
+        step_details=existing.get("step_details"),
     )
     return response
 
@@ -340,6 +344,7 @@ def _set_request_status(
     total_steps: int,
     user_id: str,
     error: str | None = None,
+    step_details: list[dict] | None = None,
 ) -> None:
     payload = {
         "request_id": request_id,
@@ -353,6 +358,8 @@ def _set_request_status(
     }
     if error:
         payload["error"] = error
+    if step_details is not None:
+        payload["step_details"] = step_details
     cache_store.set_json(
         _request_status_key(request_id),
         payload,
@@ -363,6 +370,7 @@ def _set_request_status(
 def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> dict:
     steps = _workflow_steps()
     current: dict = dict(state)
+    step_details: list[dict] = []
     pipeline = [
         ("intake", lambda s: intake_node(s)),
         ("enrichment", lambda s: enrichment_node(s, node_deps)),
@@ -374,6 +382,14 @@ def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> 
     ]
     try:
         for idx, (node_name, fn) in enumerate(pipeline, start=1):
+            step_input = _step_snapshot(current)
+            detail = {
+                "node": node_name,
+                "state": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "input": step_input,
+            }
+            step_details.append(detail)
             _set_request_status(
                 request_id=request_id,
                 state="running",
@@ -381,12 +397,29 @@ def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> 
                 step_index=idx,
                 total_steps=len(steps),
                 user_id=user_id,
+                step_details=step_details,
             )
             update = fn(current)
             if isinstance(update, dict):
                 current.update(update)
+            detail["state"] = "completed"
+            detail["finished_at"] = datetime.now(timezone.utc).isoformat()
+            detail["output"] = _step_snapshot(update if isinstance(update, dict) else {"value": str(update)})
+            _set_request_status(
+                request_id=request_id,
+                state="running",
+                current_node=node_name,
+                step_index=idx,
+                total_steps=len(steps),
+                user_id=user_id,
+                step_details=step_details,
+            )
         return current
     except Exception as exc:
+        if step_details:
+            step_details[-1]["state"] = "failed"
+            step_details[-1]["finished_at"] = datetime.now(timezone.utc).isoformat()
+            step_details[-1]["error"] = str(exc)
         _set_request_status(
             request_id=request_id,
             state="failed",
@@ -395,8 +428,48 @@ def _invoke_graph_with_status(state: dict, *, request_id: str, user_id: str) -> 
             total_steps=len(steps),
             user_id=user_id,
             error=str(exc),
+            step_details=step_details if step_details else None,
         )
         raise
+
+
+def _step_snapshot(data: dict) -> dict:
+    allow_keys = {
+        "request_id",
+        "instruction",
+        "enriched_task",
+        "rag_context",
+        "answer",
+        "route_plan",
+        "action_results",
+        "errors",
+        "final_response",
+        "trace_id",
+        "file_id",
+    }
+    out: dict = {}
+    for key in allow_keys:
+        if key in data:
+            out[key] = _truncate_json_value(data[key])
+    return out
+
+
+def _truncate_json_value(value, *, max_text: int = 400, max_items: int = 10):
+    if isinstance(value, str):
+        if len(value) <= max_text:
+            return value
+        return value[:max_text] + "...(truncated)"
+    if isinstance(value, list):
+        return [_truncate_json_value(v, max_text=max_text, max_items=max_items) for v in value[:max_items]]
+    if isinstance(value, dict):
+        out: dict = {}
+        items = list(value.items())[:max_items]
+        for k, v in items:
+            out[str(k)] = _truncate_json_value(v, max_text=max_text, max_items=max_items)
+        return out
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _file_id_from_filename(filename: str) -> str:

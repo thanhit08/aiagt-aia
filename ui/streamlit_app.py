@@ -71,6 +71,29 @@ def _render_progress_html(status: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _render_step_detail_buttons(status: dict | None) -> None:
+    details = (status or {}).get("step_details", [])
+    if not isinstance(details, list) or not details:
+        st.caption("Step details will appear after workflow starts.")
+        return
+    for idx, item in enumerate(details, start=1):
+        node = item.get("node", f"step_{idx}")
+        state = item.get("state", "unknown")
+        c1, c2, c3 = st.columns([5, 2, 2])
+        with c1:
+            st.write(f"{idx}. `{node}`")
+        with c2:
+            st.write(state)
+        with c3:
+            if st.button("Detail", key=f"detail_btn_{idx}_{node}"):
+                st.session_state.selected_step_detail = item
+
+    selected = st.session_state.get("selected_step_detail")
+    if isinstance(selected, dict):
+        st.markdown("**Step Detail**")
+        st.json(selected)
+
+
 st.set_page_config(page_title="AIA Tester", page_icon="AIA", layout="wide")
 st.title("AIA System Tester")
 
@@ -80,6 +103,10 @@ if "last_file_id" not in st.session_state:
     st.session_state.last_file_id = ""
 if "history" not in st.session_state:
     st.session_state.history = []
+if "latest_status_payload" not in st.session_state:
+    st.session_state.latest_status_payload = {}
+if "selected_step_detail" not in st.session_state:
+    st.session_state.selected_step_detail = None
 
 with st.sidebar:
     st.header("Settings")
@@ -150,6 +177,7 @@ with col_b:
     _draw_workflow_map()
     progress_placeholder = st.empty()
     detail_placeholder = st.empty()
+    per_step_placeholder = st.container()
 
     st.subheader("3) Send Message")
     instruction = st.text_area(
@@ -160,6 +188,7 @@ with col_b:
 
     if st.button("Send /qa-intake"):
         try:
+            st.session_state.selected_step_detail = None
             request_id = str(uuid.uuid4())
             payload = {
                 "request_id": request_id,
@@ -184,6 +213,7 @@ with col_b:
                             sresp = poll_client.get(f"{base_url}/qa-intake/{request_id}/status")
                             if sresp.status_code == 200:
                                 status_payload = sresp.json()
+                                st.session_state.latest_status_payload = status_payload
                                 progress_placeholder.markdown(
                                     _render_progress_html(status_payload),
                                     unsafe_allow_html=True,
@@ -208,6 +238,13 @@ with col_b:
                     unsafe_allow_html=True,
                 )
                 detail_placeholder.success("Workflow completed.")
+                try:
+                    with httpx.Client(timeout=10.0) as client:
+                        done_status = client.get(f"{base_url}/qa-intake/{request_id}/status")
+                        if done_status.status_code == 200:
+                            st.session_state.latest_status_payload = done_status.json()
+                except Exception:
+                    pass
                 st.json(data)
             else:
                 progress_placeholder.markdown(
@@ -222,6 +259,10 @@ with col_b:
                 unsafe_allow_html=True,
             )
             detail_placeholder.error(f"Request error: {exc}")
+
+    st.markdown("**Workflow Step Details**")
+    with per_step_placeholder:
+        _render_step_detail_buttons(st.session_state.latest_status_payload)
 
 st.subheader("4) Conversation Inspect")
 if st.button("Get Conversation"):
