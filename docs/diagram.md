@@ -188,6 +188,28 @@ sequenceDiagram
     E->>E: sort results to original route order
 ```
 
+## 5.2 Concurrency/Parallelism Sequence (Mode Switch)
+```mermaid
+sequenceDiagram
+    participant A as API
+    participant E as Executor
+    participant C as Config/State
+
+    A->>E: execute_actions(state)
+    E->>C: check accept_parallel request override
+    alt override exists
+      C-->>E: use override value
+    else no override
+      E->>C: read ACCEPT_PARALLEL env
+      C-->>E: env default value
+    end
+    alt parallel enabled
+      E->>E: execute dependency layers in parallel
+    else sequential mode
+      E->>E: execute in route order
+    end
+```
+
 ## 6. Parallel-Eligible vs Sequential Patterns
 ```mermaid
 flowchart LR

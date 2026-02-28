@@ -467,6 +467,29 @@ flowchart TD
   E -- yes --> G[Dependency-aware parallel executor]
 ```
 
+## 15.1) Concurrency/Parallelism (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant API as API
+  participant EX as Executor
+  participant CFG as Config/State
+
+  API->>EX: execute_actions(state)
+  EX->>CFG: check accept_parallel override
+  alt override provided
+    CFG-->>EX: use request value
+  else no override
+    EX->>CFG: read ACCEPT_PARALLEL env
+    CFG-->>EX: env default
+  end
+  alt parallel enabled
+    EX-->>EX: run dependency-layer parallel path
+  else sequential
+    EX-->>EX: run sequential path
+  end
+```
+
 ## 16) Dependency-Layer Parallel Executor
 
 ```mermaid
