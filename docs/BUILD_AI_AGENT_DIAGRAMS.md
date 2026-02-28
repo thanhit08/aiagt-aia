@@ -73,6 +73,47 @@ flowchart TD
   I --> J[Return response]
 ```
 
+## 3.1) Workflow Orchestrator (Flowchart View)
+
+```mermaid
+flowchart TD
+  W1[Intake] --> W2{RAG required?}
+  W2 -- yes --> W3[RAG Query Enrichment]
+  W3 --> W4[RAG Retrieval + Compile]
+  W2 -- no --> W5[Route Planning]
+  W4 --> W5
+  W5 --> W6[Execute Actions]
+  W6 --> W7[Aggregate]
+  W7 --> W8[Final Response]
+```
+
+## 3.2) Workflow Orchestrator (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant API as API
+  participant ORCH as Workflow Orchestrator
+  participant LLM as LLM
+  participant VS as Vector Store
+  participant TOOLS as Tool Adapters
+
+  API->>ORCH: invoke(state)
+  ORCH->>ORCH: intake
+  ORCH->>ORCH: rag_check
+  alt file_id present
+    ORCH->>LLM: rag query enrichment
+    LLM-->>ORCH: rag_query_spec
+    ORCH->>VS: search(file_id filter)
+    VS-->>ORCH: rag_context
+  end
+  ORCH->>LLM: route/enrichment
+  LLM-->>ORCH: action_plans
+  ORCH->>TOOLS: execute actions
+  TOOLS-->>ORCH: action_results
+  ORCH->>ORCH: aggregate
+  ORCH-->>API: final_response
+```
+
 ## 4) Upload + File Processing Pipeline
 
 ```mermaid
@@ -140,6 +181,28 @@ flowchart TD
   A4 --> A5[Sanitize protected fields\\n(e.g., telegram chat_id)]
   A5 --> A6[Precheck by action type\\n(jira create/assign requirements)]
   A6 --> A7[Ready for tool execution]
+```
+
+## 6.3) Enrichment (Sequence View)
+
+```mermaid
+sequenceDiagram
+  participant EX as Executor
+  participant LLM as LLM
+  participant PRE as Precheck/Sanitizer
+  participant TOOL as Tool Client
+
+  EX->>LLM: enrich params(request + rag_context + existing params)
+  LLM-->>EX: param patch
+  EX->>EX: merge patch with base params
+  EX->>PRE: sanitize + action-specific validation
+  PRE-->>EX: executable params or precheck error
+  alt precheck ok
+    EX->>TOOL: execute_action(params)
+    TOOL-->>EX: ActionResult
+  else precheck fail
+    PRE-->>EX: failed ActionResult
+  end
 ```
 
 ## 7) Routing Policy Rules (intent guardrails)

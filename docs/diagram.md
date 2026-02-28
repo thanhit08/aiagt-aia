@@ -39,6 +39,44 @@ sequenceDiagram
     A-->>U: final response
 ```
 
+## 2.1 Workflow Orchestrator Flowchart
+```mermaid
+flowchart TD
+    I[Intake] --> C{RAG Check}
+    C -- yes --> QE[RAG Query Enrichment]
+    QE --> RG[RAG Retrieval]
+    C -- no --> RT[Route Planning]
+    RG --> RT
+    RT --> EX[Execute Actions]
+    EX --> AG[Aggregate]
+    AG --> D[Done]
+```
+
+## 2.2 Workflow Orchestrator Sequence
+```mermaid
+sequenceDiagram
+    participant A as API
+    participant O as Orchestrator
+    participant L as LLM
+    participant Q as Qdrant
+    participant X as Tool Adapters
+
+    A->>O: invoke workflow(state)
+    O->>O: intake + rag_check
+    alt rag_required
+      O->>L: rag query enrichment
+      L-->>O: query spec
+      O->>Q: retrieve with file_id filter
+      Q-->>O: rag_context
+    end
+    O->>L: route/enrichment
+    L-->>O: action_plans
+    O->>X: execute actions
+    X-->>O: action_results
+    O->>O: aggregate
+    O-->>A: final response
+```
+
 ## 3. Upload Flow (`/upload`)
 ```mermaid
 sequenceDiagram
@@ -131,4 +169,24 @@ flowchart TD
     P3 --> P4[sanitize protected fields]
     P4 --> P5[action-specific precheck]
     P5 --> P6[execute tool]
+```
+
+### 8.3 Enrichment Sequence
+```mermaid
+sequenceDiagram
+    participant EX as Executor
+    participant LLM as LLM
+    participant V as Validator
+    participant T as Tool
+
+    EX->>LLM: enrich params(request + rag context + base params)
+    LLM-->>EX: enriched params patch
+    EX->>V: sanitize and validate
+    alt valid
+      V-->>EX: executable params
+      EX->>T: execute action
+      T-->>EX: ActionResult
+    else invalid
+      V-->>EX: precheck error result
+    end
 ```
